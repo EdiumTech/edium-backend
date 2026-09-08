@@ -1,0 +1,13 @@
+cloud_id  = "b1g..."
+folder_id = "b1g..."
+
+# Must be globally unique.
+resume_bucket_name = "edium-team-applications"
+
+# Safe default: notifications stay pending in the outbox and nobody is emailed.
+email_mode = "disabled"
+
+# Fill these after Herald SMTP is configured, then switch email_mode to herald.
+# team_email       = "team@example.com"
+# herald_api_key   = "..."
+# herald_email_url = "https://api.edium.online/herald/v1/emails"

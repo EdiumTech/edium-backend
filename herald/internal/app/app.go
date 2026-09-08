@@ -10,9 +10,11 @@ import (
 	tgbot "herald/internal/bot/telegram"
 	"herald/internal/config"
 	"herald/internal/domain"
+	emailhandler "herald/internal/handler/email"
 	pushhandler "herald/internal/handler/push"
 	smshandler "herald/internal/handler/sms"
 	"herald/internal/infra/db"
+	emailinfra "herald/internal/infra/email"
 	firebaseinf "herald/internal/infra/firebase"
 	"herald/internal/infra/jwks"
 	natsinf "herald/internal/infra/nats"
@@ -41,7 +43,9 @@ type App struct {
 	AttemptScoredConsumer        *worker.AttemptScoredConsumer
 	QuizGenerationNotifyConsumer *worker.QuizGenerationNotifyConsumer
 	CourseSessionNotifyConsumer  *worker.CourseSessionNotifyConsumer
+	EmailProcessor               *worker.EmailProcessor
 	smsHandler                   *smshandler.Handler
+	emailHandler                 *emailhandler.Handler
 	pushHandler                  *pushhandler.Handler
 	jwksClient                   *jwks.Client
 	httpAddr                     string
@@ -59,11 +63,6 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 		return nil, err
 	}
 
-	tgBot, err := tginfra.New(cfg.Telegram)
-	if err != nil {
-		return nil, err
-	}
-
 	txManager := db.NewTxManager(pgdb)
 	taskRepo := repository.NewPgTaskRepository(pgdb)
 	pendingOTPRepo := repository.NewPgPendingOTPRepository(pgdb)
@@ -76,8 +75,20 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 	natsPublisher := natsinf.NewPublisher(natsConn)
 	natsSubscriber := natsinf.NewSubscriber(natsConn)
 
-	senders := map[domain.Channel]worker.MessageSender{
-		domain.ChannelTG: tginfra.NewSender(tgBot),
+	senders := make(map[domain.Channel]worker.MessageSender)
+	var tgHandler *tgbot.Handler
+	if cfg.Telegram.BotToken != "" {
+		tgBot, tgErr := tginfra.New(cfg.Telegram)
+		if tgErr != nil {
+			// Telegram availability must not take down HTTP, email, SMS or push.
+			slog.Warn("telegram: инициализация не удалась, канал временно отключён", "err", tgErr)
+		} else {
+			senders[domain.ChannelTG] = tginfra.NewSender(tgBot)
+			tgHandler = tgbot.NewHandler(tgBot, otpService)
+			slog.Info("telegram: активирован")
+		}
+	} else {
+		slog.Warn("telegram: TELEGRAM_BOT_TOKEN не задан, канал отключён")
 	}
 
 	var smsSender worker.SMSSender
@@ -103,6 +114,26 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 
 	pushService := pushsvc.NewService(fcmDeviceRepo, notificationRepo, pushSender)
 
+	var emailProcessor *worker.EmailProcessor
+	emailEnabled := false
+	if cfg.Email.Enabled() {
+		emailSender, emailErr := emailinfra.NewSender(cfg.Email)
+		if emailErr != nil {
+			return nil, fmt.Errorf("email sender: %w", emailErr)
+		}
+		emailProcessor = worker.NewEmailProcessor(taskRepo, emailSender)
+		emailEnabled = true
+		slog.Info("email: SMTP активирован", "host", cfg.Email.Host, "port", cfg.Email.Port, "tls_mode", cfg.Email.TLSMode)
+	} else {
+		slog.Warn("email: SMTP_HOST или SMTP_FROM не заданы, отправка отключена")
+	}
+	var emailHandler *emailhandler.Handler
+	if cfg.Email.APIKey != "" {
+		emailHandler = emailhandler.NewHandler(taskRepo, cfg.Email.APIKey, emailEnabled)
+	} else {
+		slog.Warn("email: EMAIL_API_KEY не задан, HTTP endpoint отключён")
+	}
+
 	jwksClient := jwks.NewClient(cfg.Doorman.JWKSEndpoint)
 	if err := jwksClient.Load(ctx); err != nil {
 		return nil, fmt.Errorf("jwks: %w", err)
@@ -110,7 +141,7 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 	jwksClient.StartRefresh(ctx)
 
 	return &App{
-		TGHandler:           tgbot.NewHandler(tgBot, otpService),
+		TGHandler:           tgHandler,
 		OTPRequestPublisher: worker.NewOTPRequestPublisher(taskRepo, natsPublisher),
 		OTPSentConsumer:     worker.NewOTPSentConsumer(natsSubscriber, taskRepo),
 		OTPSentProcessor:    worker.NewOTPSentProcessor(taskRepo, otpService, senders, smsSender),
@@ -121,7 +152,9 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 		AttemptScoredConsumer:        worker.NewAttemptScoredConsumer(natsSubscriber, taskRepo),
 		QuizGenerationNotifyConsumer: worker.NewQuizGenerationNotifyConsumer(natsSubscriber, taskRepo),
 		CourseSessionNotifyConsumer:  worker.NewCourseSessionNotifyConsumer(natsSubscriber, taskRepo),
+		EmailProcessor:               emailProcessor,
 		smsHandler:                   sh,
+		emailHandler:                 emailHandler,
 		pushHandler:                  pushhandler.NewHandler(pushService),
 		jwksClient:                   jwksClient,
 		httpAddr:                     fmt.Sprintf(":%d", cfg.App.Port),
@@ -139,6 +172,9 @@ func (a *App) Router() *gin.Engine {
 	if a.smsHandler != nil {
 		a.smsHandler.Register(api)
 	}
+	if a.emailHandler != nil {
+		a.emailHandler.Register(api)
+	}
 
 	auth := api.Group("", middleware.Auth(a.jwksClient))
 	a.pushHandler.Register(auth)
@@ -151,12 +187,17 @@ func (a *App) Run(ctx context.Context) error {
 		"OTPRequestPublisher":          a.OTPRequestPublisher.Run,
 		"OTPSentConsumer":              a.OTPSentConsumer.Run,
 		"OTPSentProcessor":             a.OTPSentProcessor.Run,
-		"TGHandler":                    a.TGHandler.Run,
 		"PushNotificationProcessor":    a.PushNotificationProcessor.Run,
 		"UserLogoutConsumer":           a.UserLogoutConsumer.Run,
 		"AttemptScoredConsumer":        a.AttemptScoredConsumer.Run,
 		"QuizGenerationNotifyConsumer": a.QuizGenerationNotifyConsumer.Run,
 		"CourseSessionNotifyConsumer":  a.CourseSessionNotifyConsumer.Run,
+	}
+	if a.TGHandler != nil {
+		workers["TGHandler"] = a.TGHandler.Run
+	}
+	if a.EmailProcessor != nil {
+		workers["EmailProcessor"] = a.EmailProcessor.Run
 	}
 	for name, run := range workers {
 		go func() {

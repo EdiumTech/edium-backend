@@ -11,6 +11,7 @@ type Config struct {
 	NATS     NATSConfig
 	Telegram TelegramConfig
 	SMS      SMSConfig
+	Email    EmailConfig
 	OTel     OTelConfig
 	Doorman  DoormanConfig
 	Firebase FirebaseConfig
@@ -29,7 +30,7 @@ type NATSConfig struct {
 }
 
 type TelegramConfig struct {
-	BotToken string `env:"TELEGRAM_BOT_TOKEN,required"`
+	BotToken string `env:"TELEGRAM_BOT_TOKEN"`
 }
 
 // AllowedPhones — белый список телефонов, на которые разрешена отправка (пусто = без ограничения).
@@ -38,6 +39,20 @@ type SMSConfig struct {
 	APIKey        string   `env:"SMS_API_KEY"`
 	AllowedPhones []string `env:"SMS_ALLOWED_PHONES" envSeparator:","`
 	BlockedPhones []string `env:"SMS_BLOCKED_PHONES" envSeparator:","`
+}
+
+type EmailConfig struct {
+	APIKey   string `env:"EMAIL_API_KEY"`
+	Host     string `env:"SMTP_HOST"`
+	Port     int    `env:"SMTP_PORT" envDefault:"587"`
+	Username string `env:"SMTP_USERNAME"`
+	Password string `env:"SMTP_PASSWORD"`
+	From     string `env:"SMTP_FROM"`
+	TLSMode  string `env:"SMTP_TLS_MODE" envDefault:"starttls"`
+}
+
+func (c EmailConfig) Enabled() bool {
+	return c.Host != "" && c.From != ""
 }
 
 type OTelConfig struct {

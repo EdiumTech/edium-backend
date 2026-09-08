@@ -18,8 +18,10 @@ WITH claimed AS (
     SELECT id
     FROM task
     WHERE task_type = $1
-      AND status    = $2
-      AND available_at <= NOW()
+      AND (
+        (status = $2 AND available_at <= NOW())
+        OR (status = $4 AND updated_at <= NOW() - INTERVAL '5 minutes')
+      )
     ORDER BY available_at
     FOR UPDATE SKIP LOCKED
     LIMIT $3
@@ -67,6 +69,30 @@ func (r *PgTaskRepository) Schedule(ctx context.Context, taskType domain.TaskTyp
 	return err
 }
 
+// ScheduleUnique atomically inserts an outbox task once. It returns false when
+// the same idempotency key was already accepted.
+func (r *PgTaskRepository) ScheduleUnique(ctx context.Context, taskType domain.TaskType, payload []byte, idempotencyKey string) (bool, error) {
+	m := propagation.MapCarrier{}
+	otel.GetTextMapPropagator().Inject(ctx, m)
+	traceCtx := m.Get("traceparent")
+
+	executor := db.ExecutorFromContext(ctx, r.db)
+	result, err := executor.ExecContext(ctx, `
+INSERT INTO task (task_type, payload, trace_ctx, idempotency_key)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (task_type, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING`,
+		taskType, payload, nullableString(traceCtx), idempotencyKey,
+	)
+	if err != nil {
+		return false, fmt.Errorf("ScheduleUnique: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("ScheduleUnique rows affected: %w", err)
+	}
+	return rows == 1, nil
+}
+
 func (r *PgTaskRepository) ClaimPending(ctx context.Context, taskType domain.TaskType, limit int) ([]domain.Task, error) {
 	rows, err := r.db.QueryContext(ctx, claimPendingQuery,
 		taskType, domain.TaskStatusPending, limit, domain.TaskStatusProcessing,
@@ -104,7 +130,7 @@ func (r *PgTaskRepository) MarkDone(ctx context.Context, id uuid.UUID) error {
 
 func (r *PgTaskRepository) MarkFailed(ctx context.Context, id uuid.UUID, reason string, retryAfter time.Duration) error {
 	_, err := r.db.ExecContext(ctx, markFailedQuery,
-		domain.TaskStatusFailed, domain.TaskStatusPending, reason, retryAfter, id,
+		domain.TaskStatusFailed, domain.TaskStatusPending, reason, retryAfter.Seconds(), id,
 	)
 	if err != nil {
 		return fmt.Errorf("MarkFailed: %w", err)

@@ -35,8 +35,11 @@ jobs:
       - name: Проверка образа
         run: |
           echo '${{ secrets.YC_SA_KEY_JSON }}' | docker login --username json_key --password-stdin cr.yandex
-          docker manifest inspect ${{ env.REGISTRY }}/edium-doorman:${{ inputs.image_tag }}
-          echo "Образ существует: edium-doorman:${{ inputs.image_tag }}" >> $GITHUB_STEP_SUMMARY
+          SERVICE='${{ inputs.services }}'
+          CHECK_SERVICE="$SERVICE"
+          if [ "$CHECK_SERVICE" = "all" ]; then CHECK_SERVICE=doorman; fi
+          docker manifest inspect "${{ env.REGISTRY }}/edium-${CHECK_SERVICE}:${{ inputs.image_tag }}"
+          echo "Образ существует: edium-${CHECK_SERVICE}:${{ inputs.image_tag }}" >> $GITHUB_STEP_SUMMARY
 
       - name: Копирование файлов на сервер
         uses: appleboy/scp-action@v0.1.7
@@ -99,6 +102,13 @@ jobs:
             HERALD_PG_PWD=${{ secrets.HERALD_PG_PWD }}
             HERALD_PG_DB=${{ secrets.HERALD_PG_DB }}
             TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
+            EMAIL_API_KEY='${{ secrets.EMAIL_API_KEY }}'
+            SMTP_HOST='${{ secrets.SMTP_HOST }}'
+            SMTP_PORT=${{ secrets.SMTP_PORT }}
+            SMTP_USERNAME='${{ secrets.SMTP_USERNAME }}'
+            SMTP_PASSWORD='${{ secrets.SMTP_PASSWORD }}'
+            SMTP_FROM='${{ secrets.SMTP_FROM }}'
+            SMTP_TLS_MODE=${{ secrets.SMTP_TLS_MODE }}
             VK_GROUP_TOKEN=${{ secrets.VK_GROUP_TOKEN }}
             VK_GROUP_ID=${{ secrets.VK_GROUP_ID }}
             SMS_API_KEY=${{ secrets.SMS_API_KEY }}
@@ -172,22 +182,29 @@ jobs:
             # Авторизация в CR
             echo '${{ secrets.YC_SA_KEY_JSON }}' | docker login --username json_key --password-stdin cr.yandex
 
-            # Обновление и запуск
-            docker compose pull
-            # NATS рестартуем до старта приложений — конфиг монтируется как volume
-            docker compose up -d nats
-            docker compose restart nats
-            for i in $(seq 1 15); do nc -z 127.0.0.1 4222 2>/dev/null && break; sleep 1; done
-            docker compose up -d --remove-orphans
-            docker compose restart grafana vector caddy alertmanager
-            docker image prune -f
+            # Обновление только выбранного сервиса. Полный сценарий сохранён для all.
+            SERVICE='${{ inputs.services }}'
+            if [ "$SERVICE" = "all" ]; then
+              docker compose pull
+              # NATS рестартуем до старта приложений — конфиг монтируется как volume
+              docker compose up -d nats
+              docker compose restart nats
+              for i in $(seq 1 15); do nc -z 127.0.0.1 4222 2>/dev/null && break; sleep 1; done
+              docker compose up -d --remove-orphans
+              docker compose restart grafana vector caddy alertmanager
 
-            # Миграции ClickHouse
-            docker compose exec -T clickhouse clickhouse-client \
-              --user vector \
-              --password "${{ secrets.CLICKHOUSE_PASSWORD }}" \
-              --database logs \
-              --multiquery < /opt/edium/clickhouse/migrate.sql
+              # Миграции ClickHouse нужны только при полном деплое.
+              docker compose exec -T clickhouse clickhouse-client \
+                --user vector \
+                --password "${{ secrets.CLICKHOUSE_PASSWORD }}" \
+                --database logs \
+                --multiquery < /opt/edium/clickhouse/migrate.sql
+            else
+              docker compose pull "$SERVICE"
+              docker compose run --rm "${SERVICE}-flyway"
+              docker compose up -d --no-deps "$SERVICE"
+            fi
+            docker image prune -f
 
             # Очистка
             rm -rf /tmp/edium-deploy

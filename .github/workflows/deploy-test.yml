@@ -372,6 +372,13 @@ jobs:
             HERALD_PG_PWD=${{ secrets.HERALD_PG_PWD }}
             HERALD_PG_DB=${{ secrets.HERALD_PG_DB }}
             TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
+            EMAIL_API_KEY='${{ secrets.EMAIL_API_KEY }}'
+            SMTP_HOST='${{ secrets.SMTP_HOST }}'
+            SMTP_PORT=${{ secrets.SMTP_PORT }}
+            SMTP_USERNAME='${{ secrets.SMTP_USERNAME }}'
+            SMTP_PASSWORD='${{ secrets.SMTP_PASSWORD }}'
+            SMTP_FROM='${{ secrets.SMTP_FROM }}'
+            SMTP_TLS_MODE=${{ secrets.SMTP_TLS_MODE }}
             VK_GROUP_TOKEN=${{ secrets.VK_GROUP_TOKEN }}
             VK_GROUP_ID=${{ secrets.VK_GROUP_ID }}
             SMS_API_KEY=${{ secrets.SMS_API_KEY }}
@@ -590,6 +597,13 @@ jobs:
             HERALD_PG_PWD=${{ secrets.HERALD_PG_PWD }}
             HERALD_PG_DB=${{ secrets.HERALD_PG_DB }}
             TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
+            EMAIL_API_KEY='${{ secrets.EMAIL_API_KEY }}'
+            SMTP_HOST='${{ secrets.SMTP_HOST }}'
+            SMTP_PORT=${{ secrets.SMTP_PORT }}
+            SMTP_USERNAME='${{ secrets.SMTP_USERNAME }}'
+            SMTP_PASSWORD='${{ secrets.SMTP_PASSWORD }}'
+            SMTP_FROM='${{ secrets.SMTP_FROM }}'
+            SMTP_TLS_MODE=${{ secrets.SMTP_TLS_MODE }}
             VK_GROUP_TOKEN=${{ secrets.VK_GROUP_TOKEN }}
             VK_GROUP_ID=${{ secrets.VK_GROUP_ID }}
             SMS_API_KEY=${{ secrets.SMS_API_KEY }}

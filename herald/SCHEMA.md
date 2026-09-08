@@ -24,8 +24,28 @@ erDiagram
         ts    created_at
         ts    processed_at
     }
+
+    task {
+        uuid  id               PK
+        text  task_type
+        jsonb payload
+        text  status
+        int   attempts
+        int   max_attempts
+        text  idempotency_key  "UNIQUE with task_type, nullable"
+        ts    available_at
+        text  last_error
+        text  trace_ctx
+        ts    created_at
+        ts    updated_at
+    }
 ```
 
 `pending_otp.channel` — строковое поле: `tg`, `sms`.
 
 `sms_task.status` — строковое поле: `pending`, `sent`.
+
+Email uses `task.task_type = email_delivery`. Its payload contains one recipient,
+subject, plain-text body and optional HTML body. The `(task_type,
+idempotency_key)` partial unique index prevents duplicate enqueue calls. Recipient
+and message content are not copied into technical logs.
