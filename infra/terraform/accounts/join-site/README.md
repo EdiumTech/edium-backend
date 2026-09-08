@@ -155,4 +155,6 @@ Assume 100 applications/month, an average 2 MB resume, 500 administrative reads,
 - The runner uses one 512 MB / one-core instance only during requests; exact Serverless Container and registry charges should be checked in the reviewed plan and billing calculator before apply.
 - SMTP/provider charges and outgoing resume downloads depend on the selected provider and actual usage.
 
+At 60 runner calls/month and a deliberately conservative 2.5 seconds per call, usage is about 0.042 vCPU-hours and 0.021 GB-hours. Together with roughly 0.2 GB of resumes, fewer than 100,000 gateway calls and fewer than 1,000,000 function/container calls, the directly metered join workload is expected to be about 0 ₽/month inside the published free allowances. Registry image storage, Herald/SMTP and traffic beyond free allowances remain separate.
+
 Recalculate before production if expected application volume, retention, or average resume size changes.
