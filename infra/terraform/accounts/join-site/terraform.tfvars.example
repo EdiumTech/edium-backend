@@ -1,6 +1,9 @@
 cloud_id  = "b1g..."
 folder_id = "b1g..."
 
+# Existing service account allowed to invoke Cloud Functions.
+invoker_service_account_id = "aje..."
+
 # Must be globally unique.
 resume_bucket_name = "edium-team-applications"
 

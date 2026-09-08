@@ -14,6 +14,11 @@ variable "sa_key_file" {
   default     = "key.json"
 }
 
+variable "invoker_service_account_id" {
+  type        = string
+  description = "Existing deployment service account used by API Gateway and the timer to invoke the functions."
+}
+
 variable "resume_bucket_name" {
   type        = string
   description = "Globally unique private Object Storage bucket name."

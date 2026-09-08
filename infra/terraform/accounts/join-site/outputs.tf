@@ -12,7 +12,3 @@ output "admin_token" {
 output "resume_bucket" {
   value = yandex_storage_bucket.resumes.bucket
 }
-
-output "ydb_database" {
-  value = yandex_ydb_database_serverless.applications.database_path
-}
