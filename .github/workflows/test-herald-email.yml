@@ -1,0 +1,36 @@
+name: Test Herald Email
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  send-test-email:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Отправить тестовое письмо
+        env:
+          EMAIL_API_KEY: ${{ secrets.EMAIL_API_KEY }}
+        run: |
+          set -euo pipefail
+          IDEMPOTENCY_KEY="smoke:github:${{ github.run_id }}:${{ github.run_attempt }}"
+          STATUS_CODE="$(curl --silent --show-error \
+            --output response.json \
+            --write-out '%{http_code}' \
+            --request POST \
+            --header "Authorization: Bearer ${EMAIL_API_KEY}" \
+            --header "Idempotency-Key: ${IDEMPOTENCY_KEY}" \
+            --header 'Content-Type: application/json' \
+            --data '{"to":"hr@edium.online","subject":"Тестовое письмо Edium HR","text_body":"Herald успешно принял тестовое письмо и отправляет его через SMTP Яндекс 360.","html_body":"<p><strong>Herald работает.</strong></p><p>Тестовое письмо отправлено через SMTP Яндекс 360.</p>"}' \
+            https://api.edium.online/herald/v1/emails)"
+
+          cat response.json
+          test "${STATUS_CODE}" = "202"
+
+      - name: Итог
+        run: |
+          echo "## Herald Email Smoke Test" >> "$GITHUB_STEP_SUMMARY"
+          echo "Тестовое письмо поставлено в очередь для hr@edium.online." >> "$GITHUB_STEP_SUMMARY"
