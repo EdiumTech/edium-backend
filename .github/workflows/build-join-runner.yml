@@ -15,7 +15,7 @@ jobs:
 
       - name: Проверка конфигурации реестра
         env:
-          REGISTRY_ID: ${{ vars.YC_REGISTRY_ID }}
+          REGISTRY_ID: ${{ secrets.YC_REGISTRY_ID }}
         run: test -n "$REGISTRY_ID"
 
       - name: Вход в приватный реестр
@@ -30,7 +30,7 @@ jobs:
       - name: Сборка и публикация
         id: image
         env:
-          REGISTRY_ID: ${{ vars.YC_REGISTRY_ID }}
+          REGISTRY_ID: ${{ secrets.YC_REGISTRY_ID }}
         run: |
           set -euo pipefail
           IMAGE="cr.yandex/${REGISTRY_ID}/edium-join-runner:${GITHUB_SHA}"
