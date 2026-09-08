@@ -1,0 +1,86 @@
+name: Deploy Join Site API
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Применить проверенный план"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  TF_VERSION: "1.9"
+  YC_MIRROR: "https://terraform-mirror.yandexcloud.net/"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    defaults:
+      run:
+        working-directory: infra/terraform/accounts/join-site
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Подготовка изолированной конфигурации
+        run: |
+          set -euo pipefail
+          cat > ~/.terraformrc <<'EOF'
+          provider_installation {
+            network_mirror {
+              url = "${{ env.YC_MIRROR }}"
+              include = ["registry.terraform.io/*/*"]
+            }
+            direct {
+              exclude = ["registry.terraform.io/*/*"]
+            }
+          }
+          EOF
+          printf '%s' '${{ secrets.YC_SA_KEY_JSON }}' > key.json
+          printf '%s' '${{ secrets.TF_VARS_PLATFORM }}' > platform.tfvars
+          grep -E '^[[:space:]]*(cloud_id|folder_id)[[:space:]]*=' platform.tfvars > terraform.tfvars
+          test "$(wc -l < terraform.tfvars)" -eq 2
+          cat >> terraform.tfvars <<'EOF'
+          resume_bucket_name = "edium-team-applications"
+          email_mode         = "herald"
+          team_email         = "olympguide@mail.ru"
+          herald_api_key     = "${{ secrets.EMAIL_API_KEY }}"
+          EOF
+
+      - name: Terraform init
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.TF_S3_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.TF_S3_SECRET_KEY }}
+        run: terraform init
+
+      - name: Terraform plan
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.TF_S3_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.TF_S3_SECRET_KEY }}
+        run: terraform plan -no-color -out=tfplan
+
+      - name: Terraform apply
+        if: inputs.apply
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.TF_S3_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.TF_S3_SECRET_KEY }}
+        run: terraform apply -auto-approve tfplan
+
+      - name: Результат
+        if: inputs.apply
+        run: |
+          echo "## Join Site API" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **API:** $(terraform output -raw api_base_url)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Режим почты:** Herald" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Очистка секретных файлов
+        if: always()
+        run: rm -f key.json platform.tfvars terraform.tfvars tfplan function.zip
