@@ -111,7 +111,7 @@ resource "yandex_lockbox_secret_version" "runtime" {
     text_value = random_password.ip_hash_salt.result
   }
   dynamic "entries" {
-    for_each = var.herald_api_key != "" ? [1] : []
+    for_each = var.email_mode == "herald" ? { herald = true } : {}
     content {
       key        = "herald-api-key"
       text_value = var.herald_api_key
@@ -222,7 +222,7 @@ resource "yandex_function" "maintenance" {
     environment_variable = "IP_HASH_SALT"
   }
   dynamic "secrets" {
-    for_each = var.herald_api_key != "" ? [1] : []
+    for_each = var.email_mode == "herald" ? { herald = true } : {}
     content {
       id                   = yandex_lockbox_secret.runtime.id
       version_id           = yandex_lockbox_secret_version.runtime.id
