@@ -13,6 +13,7 @@ class Mailer:
         )
         self.herald_api_key = os.getenv("HERALD_API_KEY", "")
         self.admin_url = os.getenv("ADMIN_URL", "https://edium.online/join/admin/")
+        self.contest_url = os.getenv("CONTEST_URL", "https://edium.online/join/contest/")
 
     @property
     def enabled(self) -> bool:
@@ -39,6 +40,32 @@ class Mailer:
             f"{application['first_name']}, спасибо! Заявка получена.\n\n"
             "Если увидим подходящее направление для сотрудничества, свяжемся с тобой.\n",
             f"candidate:{application['application_id']}:confirmation",
+        )
+
+    def send_contest_invitation(self, application: dict, contest: dict, invite_url: str) -> None:
+        if not application.get("email"):
+            return
+        start_before = contest["start_before"].astimezone().strftime("%d.%m.%Y %H:%M %Z")
+        self._send(
+            application["email"],
+            "Приглашение на контест Edium",
+            f"{application['first_name']}, приглашаем тебя пройти небольшой программный контест Edium.\n\n"
+            f"Продолжительность: {contest['duration_minutes']} минут.\n"
+            f"Начать можно до: {start_before}.\n"
+            "Таймер запустится только после того, как ты прочитаешь правила и явно подтвердишь начало.\n\n"
+            f"Персональная ссылка:\n{invite_url}\n",
+            f"contest:{contest['contest_id']}:invitation:{contest.get('invitation_send_version', 1)}",
+        )
+
+    def send_contest_completion(self, application: dict, contest: dict) -> None:
+        status = "завершён кандидатом" if contest["state"] == "submitted" else "завершён по времени"
+        link = f"{self.admin_url}#application={application['application_id']}"
+        self._send(
+            self.team_email,
+            f"Контест Edium: {application['first_name']} {application['last_name']}",
+            f"Контест кандидата {application['first_name']} {application['last_name']} {status}.\n\n"
+            f"Открыть результат в закрытом разделе:\n{link}\n",
+            f"contest:{contest['contest_id']}:completion:{contest['state']}",
         )
 
     def _send(

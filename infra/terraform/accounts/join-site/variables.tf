@@ -65,3 +65,19 @@ variable "admin_url" {
   description = "Closed candidate-list URL included in team notifications."
   default     = "https://edium.online/join/admin/"
 }
+
+variable "contest_url" {
+  type        = string
+  description = "Public candidate contest URL. Invite tokens are appended as URL fragments."
+  default     = "https://edium.online/join/contest/"
+}
+
+variable "runner_image_url" {
+  type        = string
+  description = "Pinned Yandex Container Registry image URL for the QuickJS/Wasm runner. Empty disables code execution."
+  default     = ""
+  validation {
+    condition     = var.runner_image_url == "" || can(regex("@sha256:[0-9a-f]{64}$", var.runner_image_url))
+    error_message = "runner_image_url must be empty or pinned by an @sha256 digest."
+  }
+}

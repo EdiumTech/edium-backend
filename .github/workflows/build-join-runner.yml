@@ -1,0 +1,49 @@
+name: Build Join Contest Runner
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Проверка конфигурации реестра
+        env:
+          REGISTRY_ID: ${{ vars.YC_REGISTRY_ID }}
+        run: test -n "$REGISTRY_ID"
+
+      - name: Вход в приватный реестр
+        env:
+          YC_SA_KEY_JSON: ${{ secrets.YC_SA_KEY_JSON }}
+        run: printf '%s' "$YC_SA_KEY_JSON" | docker login --username json_key --password-stdin cr.yandex
+
+      - name: Тесты песочницы
+        working-directory: infra/terraform/accounts/join-site/runner
+        run: npm ci --ignore-scripts && npm test
+
+      - name: Сборка и публикация
+        id: image
+        env:
+          REGISTRY_ID: ${{ vars.YC_REGISTRY_ID }}
+        run: |
+          set -euo pipefail
+          IMAGE="cr.yandex/${REGISTRY_ID}/edium-join-runner:${GITHUB_SHA}"
+          docker build --pull --tag "$IMAGE" infra/terraform/accounts/join-site/runner
+          docker push "$IMAGE"
+          DIGEST="$(docker buildx imagetools inspect "$IMAGE" --format '{{json .Manifest.Digest}}' | tr -d '"')"
+          test "${DIGEST#sha256:}" != "$DIGEST"
+          echo "image=cr.yandex/${REGISTRY_ID}/edium-join-runner@${DIGEST}" >> "$GITHUB_OUTPUT"
+
+      - name: Следующий шаг
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+        run: |
+          echo "## Изолированный runner собран" >> "$GITHUB_STEP_SUMMARY"
+          echo "Установите GitHub Environment variable \`JOIN_RUNNER_IMAGE_URL\` в значение:" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`$IMAGE\`" >> "$GITHUB_STEP_SUMMARY"

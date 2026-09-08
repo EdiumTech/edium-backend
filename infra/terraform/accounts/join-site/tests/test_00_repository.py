@@ -1,4 +1,5 @@
 import io
+import hashlib
 import importlib.util
 import os
 from pathlib import Path
@@ -46,9 +47,18 @@ class FakeS3:
     def get_object(self, *, Bucket, Key):
         if Key not in self.objects:
             raise ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
-        return {"Body": io.BytesIO(self.objects[Key])}
+        body = self.objects[Key]
+        return {"Body": io.BytesIO(body), "ETag": self.etag(body)}
 
-    def put_object(self, *, Bucket, Key, Body, **kwargs):
+    @staticmethod
+    def etag(body):
+        return f'"{hashlib.md5(body).hexdigest()}"'
+
+    def put_object(self, *, Bucket, Key, Body, IfNoneMatch=None, IfMatch=None, **kwargs):
+        if IfNoneMatch == "*" and Key in self.objects:
+            raise ClientError({"Error": {"Code": "PreconditionFailed"}}, "PutObject")
+        if IfMatch is not None and (Key not in self.objects or self.etag(self.objects[Key]) != IfMatch):
+            raise ClientError({"Error": {"Code": "PreconditionFailed"}}, "PutObject")
         self.objects[Key] = Body
 
     def delete_object(self, *, Bucket, Key):
@@ -116,6 +126,29 @@ class RepositoryTests(unittest.TestCase):
         self.assertTrue(self.repository.allow_request("upload:test", expires_at, 2))
         self.assertTrue(self.repository.allow_request("upload:test", expires_at, 2))
         self.assertFalse(self.repository.allow_request("upload:test", expires_at, 2))
+
+    def test_contest_create_and_compare_and_swap(self):
+        now = datetime.now(timezone.utc)
+        contest = {
+            "contest_id": "22222222-2222-4222-8222-222222222222",
+            "application_id": "11111111-1111-4111-8111-111111111111",
+            "state": "invited",
+            "created_at": now,
+            "updated_at": now,
+        }
+        self.assertTrue(self.repository.create_contest(contest))
+        self.assertFalse(self.repository.create_contest(contest))
+        stored, etag = self.repository.get_contest_with_etag(contest["contest_id"])
+        stored["state"] = "opened"
+        self.repository.save_contest(stored, etag)
+        with self.assertRaises(repository_module.ContestConflict):
+            self.repository.save_contest(stored, etag)
+
+    def test_contest_rate_limit_is_enforced(self):
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+        self.assertTrue(self.repository.allow_contest_request("run:test", expires_at, 2))
+        self.assertTrue(self.repository.allow_contest_request("run:test", expires_at, 2))
+        self.assertFalse(self.repository.allow_contest_request("run:test", expires_at, 2))
 
 
 if __name__ == "__main__":

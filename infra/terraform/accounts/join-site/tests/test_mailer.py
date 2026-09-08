@@ -3,6 +3,7 @@ import json
 import os
 import sys
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -79,6 +80,23 @@ class MailerTests(unittest.TestCase):
     def test_disabled_without_api_key(self):
         with mock.patch.dict(os.environ, {"HERALD_API_KEY": ""}):
             self.assertFalse(mailer_module.Mailer().enabled)
+
+    @mock.patch("urllib.request.urlopen", return_value=FakeResponse())
+    def test_contest_resend_has_new_idempotency_boundary(self, urlopen):
+        contest = {
+            "contest_id": "22222222-2222-4222-8222-222222222222",
+            "duration_minutes": 90,
+            "start_before": datetime(2026, 9, 10, tzinfo=timezone.utc),
+            "invitation_send_version": 2,
+        }
+        mailer_module.Mailer().send_contest_invitation(self.application(), contest, "https://edium.online/join/contest/#invite=synthetic")
+        request = urlopen.call_args.args[0]
+        self.assertEqual(request.headers["Idempotency-key"], "contest:22222222-2222-4222-8222-222222222222:invitation:2")
+
+    @mock.patch("urllib.request.urlopen", side_effect=mailer_module.urllib.error.URLError("offline"))
+    def test_herald_outage_is_reported_for_outbox_retry(self, _urlopen):
+        with self.assertRaisesRegex(RuntimeError, "unavailable"):
+            mailer_module.Mailer().send_candidate(self.application())
 
 
 if __name__ == "__main__":

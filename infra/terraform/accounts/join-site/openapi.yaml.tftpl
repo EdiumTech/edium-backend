@@ -3,7 +3,10 @@ info:
   title: Edium Join API
   version: 1.0.0
 x-yc-apigateway-cors:
-  origin: '*'
+  origin:
+%{ for origin in allowed_origins ~}
+    - ${origin}
+%{ endfor ~}
   methods: [GET, POST, PATCH, DELETE, OPTIONS]
   allowedHeaders: [Content-Type, Authorization, Idempotency-Key]
   credentials: false
@@ -23,6 +26,48 @@ paths:
       x-yc-apigateway-integration: *function
       responses:
         '201': { description: Application saved }
+  /v1/contest:
+    get:
+      operationId: getContest
+      x-yc-apigateway-integration: *function
+      responses:
+        '200': { description: Authorized candidate contest }
+  /v1/contest/open:
+    post:
+      operationId: openContest
+      x-yc-apigateway-integration: *function
+      responses:
+        '200': { description: Rules opened without starting timer }
+  /v1/contest/start:
+    post:
+      operationId: startContest
+      x-yc-apigateway-integration: *function
+      responses:
+        '200': { description: Server timer started idempotently }
+  /v1/contest/answers/{taskId}:
+    parameters:
+      - name: taskId
+        in: path
+        required: true
+        schema: { type: string }
+    patch:
+      operationId: saveContestAnswer
+      x-yc-apigateway-integration: *function
+      responses:
+        '200': { description: Answer saved with optimistic revision }
+        '409': { description: A newer revision exists }
+  /v1/contest/run:
+    post:
+      operationId: runContestTests
+      x-yc-apigateway-integration: *function
+      responses:
+        '200': { description: Sanitized sandbox test report }
+  /v1/contest/submit:
+    post:
+      operationId: submitContest
+      x-yc-apigateway-integration: *function
+      responses:
+        '200': { description: Contest frozen idempotently }
   /v1/admin/applications:
     get:
       operationId: listApplications
@@ -61,3 +106,47 @@ paths:
       x-yc-apigateway-integration: *function
       responses:
         '200': { description: 60-second private download URL }
+  /v1/admin/applications/{applicationId}/contest:
+    parameters: &applicationContestParameters
+      - name: applicationId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getApplicationContest
+      x-yc-apigateway-integration: *function
+      responses:
+        '200': { description: Contest and review details }
+    post:
+      operationId: issueApplicationContest
+      x-yc-apigateway-integration: *function
+      responses:
+        '201': { description: Personal invitation created }
+  /v1/admin/applications/{applicationId}/contest/resend:
+    parameters: *applicationContestParameters
+    post:
+      operationId: resendContestInvitation
+      x-yc-apigateway-integration: *function
+      responses:
+        '200': { description: Existing invitation queued again }
+  /v1/admin/applications/{applicationId}/contest/revoke:
+    parameters: *applicationContestParameters
+    post:
+      operationId: revokeContestInvitation
+      x-yc-apigateway-integration: *function
+      responses:
+        '200': { description: Invitation revoked }
+  /v1/admin/applications/{applicationId}/contest/extend:
+    parameters: *applicationContestParameters
+    post:
+      operationId: extendContestDeadline
+      x-yc-apigateway-integration: *function
+      responses:
+        '200': { description: Deadline extended once }
+  /v1/admin/applications/{applicationId}/contest/review:
+    parameters: *applicationContestParameters
+    patch:
+      operationId: reviewApplicationContest
+      x-yc-apigateway-integration: *function
+      responses:
+        '200': { description: Internal review saved }
