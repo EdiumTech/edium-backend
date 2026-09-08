@@ -21,6 +21,7 @@ var (
 	OTPRequest       TaskType = "otp_request"
 	OTPSent          TaskType = "otp_sent"
 	PushNotification TaskType = "push_notification"
+	EmailDelivery    TaskType = "email_delivery"
 )
 
 type Task struct {

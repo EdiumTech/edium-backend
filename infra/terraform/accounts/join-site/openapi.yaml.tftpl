@@ -1,0 +1,63 @@
+openapi: 3.0.0
+info:
+  title: Edium Join API
+  version: 1.0.0
+x-yc-apigateway-cors:
+  origin: '*'
+  methods: [GET, POST, PATCH, DELETE, OPTIONS]
+  allowedHeaders: [Content-Type, Authorization, Idempotency-Key]
+  credentials: false
+paths:
+  /v1/uploads:
+    post:
+      operationId: createUpload
+      x-yc-apigateway-integration: &function
+        type: cloud_functions
+        function_id: ${function_id}
+        service_account_id: ${service_account_id}
+      responses:
+        '201': { description: Upload intent created }
+  /v1/applications:
+    post:
+      operationId: createApplication
+      x-yc-apigateway-integration: *function
+      responses:
+        '201': { description: Application saved }
+  /v1/admin/applications:
+    get:
+      operationId: listApplications
+      x-yc-apigateway-integration: *function
+      responses:
+        '200': { description: Server-authorized application list }
+  /v1/admin/applications/{applicationId}:
+    parameters:
+      - name: applicationId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getApplication
+      x-yc-apigateway-integration: *function
+      responses:
+        '200': { description: Server-authorized application details }
+    patch:
+      operationId: updateApplication
+      x-yc-apigateway-integration: *function
+      responses:
+        '200': { description: Status updated }
+    delete:
+      operationId: deleteApplication
+      x-yc-apigateway-integration: *function
+      responses:
+        '200': { description: Application and resume deleted }
+  /v1/admin/applications/{applicationId}/resume:
+    parameters:
+      - name: applicationId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: downloadResume
+      x-yc-apigateway-integration: *function
+      responses:
+        '200': { description: 60-second private download URL }

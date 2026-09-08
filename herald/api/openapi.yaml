@@ -1,8 +1,8 @@
 openapi: "3.0.3"
 info:
   title: Edium Herald
-  description: Уведомления — FCM push-токены устройств, история уведомлений
-  version: "1.0.0"
+  description: Уведомления — email outbox, FCM push-токены устройств и история уведомлений
+  version: "1.1.0"
 
 servers:
   - url: https://api.edium.online
@@ -15,11 +15,58 @@ tags:
     description: Управление FCM-токенами устройств
   - name: Notifications
     description: История уведомлений
+  - name: Email
+    description: Внутренняя очередь исходящих писем
 
 security:
   - bearerAuth: []
 
 paths:
+  /herald/v1/emails:
+    post:
+      tags: [Email]
+      summary: Поставить письмо в очередь
+      description: |
+        Внутренний endpoint для доверенных сервисов. Письмо сохраняется в PostgreSQL
+        outbox до попытки SMTP-доставки. Повтор с тем же `Idempotency-Key` не создаёт
+        второе письмо. Отправитель берётся из серверного `SMTP_FROM` и не может быть
+        переопределён вызывающей стороной.
+      security:
+        - emailApiKey: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Стабильный ключ операции длиной до 128 символов
+          schema:
+            type: string
+            maxLength: 128
+            pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnqueueEmailRequest'
+      responses:
+        "202":
+          description: Письмо поставлено в очередь или уже было принято ранее
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [queued, duplicate]
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "503":
+          description: SMTP не настроен
+
   /herald/v1/devices:
     post:
       tags: [Devices]
@@ -132,8 +179,32 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+    emailApiKey:
+      type: http
+      scheme: bearer
+      description: Отдельный `EMAIL_API_KEY` только для доверенных серверных клиентов
 
   schemas:
+    EnqueueEmailRequest:
+      type: object
+      required: [to, subject, text_body]
+      properties:
+        to:
+          type: string
+          format: email
+          description: Один получатель
+        subject:
+          type: string
+          minLength: 1
+          maxLength: 200
+        text_body:
+          type: string
+          minLength: 1
+          maxLength: 100000
+        html_body:
+          type: string
+          maxLength: 100000
+
     RegisterDeviceRequest:
       type: object
       required: [fcm_token, platform]
