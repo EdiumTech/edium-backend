@@ -53,7 +53,7 @@ jobs:
           cat >> terraform.tfvars <<'EOF'
           resume_bucket_name = "edium-team-applications"
           email_mode         = "herald"
-          team_email         = "olympguide@mail.ru"
+          team_email         = "hr@edium.online"
           herald_api_key     = "${{ secrets.EMAIL_API_KEY }}"
           EOF
 
