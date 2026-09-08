@@ -1,0 +1,60 @@
+name: Join Site CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "infra/terraform/accounts/join-site/**"
+      - ".github/workflows/join-site-ci.yml"
+      - ".github/workflows/build-join-runner.yml"
+      - ".github/workflows/deploy-join-site.yml"
+
+permissions:
+  contents: read
+
+env:
+  TF_VERSION: "1.9"
+  YC_MIRROR: "https://terraform-mirror.yandexcloud.net/"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform/accounts/join-site
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: infra/terraform/accounts/join-site/runner/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure provider mirror
+        run: |
+          cat > ~/.terraformrc <<'EOF'
+          provider_installation {
+            network_mirror {
+              url = "${{ env.YC_MIRROR }}"
+              include = ["registry.terraform.io/*/*"]
+            }
+            direct {
+              exclude = ["registry.terraform.io/*/*"]
+            }
+          }
+          EOF
+
+      - name: Python tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Sandbox tests
+        run: npm --prefix runner ci --ignore-scripts && npm --prefix runner test
+
+      - name: Terraform validation
+        run: terraform init -backend=false -input=false && terraform fmt -check -recursive && terraform validate
