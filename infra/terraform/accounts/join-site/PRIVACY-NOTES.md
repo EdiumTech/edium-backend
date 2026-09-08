@@ -15,6 +15,6 @@ Before publishing `/join/`, the owner or counsel should approve an update contai
 - a real channel for access, correction, withdrawal, and deletion requests;
 - withdrawal and backup-handling rules.
 
-Contest capability tokens are not stored in plaintext or written to application logs. The runner receives only a task id and source code, has no browser identity or resume data, and returns a bounded test report. Reviewer scores are not an automated hiring decision and must not be presented as one.
+Contest capability tokens are not stored in plaintext or written to application logs. The runner receives only the assigned task-set version, task id and JavaScript source code, has no browser identity or resume data, and returns a bounded report for every test. Reviewer scores are not an automated hiring decision and must not be presented as one.
 
 The staged form names the candidate-review purpose and links to the policy, but this does not replace legal approval. No controller identity or legal details were invented.

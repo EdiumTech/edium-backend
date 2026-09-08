@@ -5,17 +5,13 @@ import hmac
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlparse
-
-from contest_content import LANGUAGE, TASKS, TASK_SET_VERSION, task_ids
+from contest_content import LANGUAGE, LEGACY_TASK_SET_VERSION, public_tasks, resolve_task_set, task_ids, track_label
 
 
 CONTEST_STATES = {"invited", "opened", "started", "submitted", "expired", "revoked"}
 FINAL_STATES = {"submitted", "expired", "revoked"}
 MAX_SOURCE_LENGTH = 65536
-MAX_EXPLANATION_LENGTH = 2400
 RETENTION_DAYS = 180
-TASKS_BY_ID = {task["id"]: task for task in TASKS}
 
 
 class ContestError(Exception):
@@ -67,7 +63,12 @@ def token_matches(contest: dict, token: str, token_key: str) -> bool:
     )
 
 
-def new_contest(application_id: str, duration_minutes: int, start_before: datetime, now: datetime | None = None) -> tuple[dict, str]:
+def assigned_task_set(contest: dict) -> str:
+    # A missing version belongs to the original assignments, never the newest set.
+    return contest.get("task_set_version") or LEGACY_TASK_SET_VERSION
+
+
+def new_contest(application_id: str, duration_minutes: int, start_before: datetime, now: datetime | None = None, *, direction: str | None = None) -> tuple[dict, str]:
     now = now or utcnow()
     if duration_minutes < 15 or duration_minutes > 240:
         raise ContestError("invalid_duration", "Продолжительность должна быть от 15 до 240 минут.")
@@ -80,7 +81,8 @@ def new_contest(application_id: str, duration_minutes: int, start_before: dateti
     record = {
         "contest_id": contest_id,
         "application_id": application_id,
-        "task_set_version": TASK_SET_VERSION,
+        "task_set_version": resolve_task_set(direction),
+        "direction": direction,
         "language": LANGUAGE,
         "state": "invited",
         "duration_minutes": duration_minutes,
@@ -150,6 +152,17 @@ def start_contest(contest: dict, now: datetime) -> bool:
     return True
 
 
+def validate_source(source) -> None:
+    if not isinstance(source, str):
+        raise ContestError("invalid_source", "Передай исходный код JavaScript.")
+    try:
+        source_bytes = len(source.encode("utf-8"))
+    except UnicodeEncodeError as error:
+        raise ContestError("invalid_source", "В коде есть некорректные символы Unicode.") from error
+    if source_bytes > MAX_SOURCE_LENGTH:
+        raise ContestError("invalid_source", "Код должен быть короче 64 КБ.")
+
+
 def save_answer(contest: dict, task_id: str, payload: dict, expected_revision: int, now: datetime) -> bool:
     if expire_if_due(contest, now):
         raise ContestError("expired", "Время истекло. Сохранена последняя серверная версия.", 410)
@@ -157,22 +170,13 @@ def save_answer(contest: dict, task_id: str, payload: dict, expected_revision: i
         raise ContestError("not_started", "Сначала запусти контест.", 409)
     if expected_revision != int(contest["revision"]):
         raise ContestError("revision_conflict", "В другой вкладке уже сохранена более новая версия.", 409)
-    if task_id not in task_ids():
+    if task_id not in task_ids(assigned_task_set(contest)):
         raise ContestError("unknown_task", "Задача не найдена.", 404)
     source = payload.get("source")
-    explanation = payload.get("explanation", "")
-    link = payload.get("url") or None
-    if not isinstance(source, str) or len(source) > MAX_SOURCE_LENGTH:
-        raise ContestError("invalid_source", "Код должен быть короче 64 КБ.")
-    task = TASKS_BY_ID[task_id]
-    maximum = min(int(task.get("maxExplanation", MAX_EXPLANATION_LENGTH)), MAX_EXPLANATION_LENGTH)
-    if not isinstance(explanation, str) or len(explanation) > maximum:
-        raise ContestError("invalid_explanation", f"Описание решения должно быть короче {maximum} символов.")
-    if link and not valid_url(link):
-        raise ContestError("invalid_url", "Укажи корректную ссылку http или https.")
+    validate_source(source)
     previous = contest["answers"].get(task_id)
-    next_answer = {"source": source, "explanation": explanation, "url": link, "updated_at": now}
-    if previous and all(previous.get(key) == next_answer.get(key) for key in ("source", "explanation", "url")):
+    next_answer = {"source": source, "updated_at": now}
+    if previous and previous.get("source") == source:
         return False
     contest["answers"][task_id] = next_answer
     _touch(contest, f"answer_saved:{task_id}", now, audit=False)
@@ -186,13 +190,10 @@ def submit_contest(contest: dict, now: datetime) -> bool:
         return False
     if contest["state"] != "started":
         raise ContestError("not_started", "Контест нельзя отправить в текущем состоянии.", 409)
-    for task in TASKS:
+    for task in public_tasks(assigned_task_set(contest)):
         answer = contest.get("answers", {}).get(task["id"], {})
         if not str(answer.get("source", "")).strip():
             raise ContestError("incomplete", f"Добавь решение задачи «{task['title']}». ", 409)
-        minimum = int(task.get("minExplanation", 0))
-        if len(str(answer.get("explanation", "")).strip()) < minimum:
-            raise ContestError("incomplete", f"Дополни объяснение задачи «{task['title']}» минимум до {minimum} символов.", 409)
     _finish(contest, "submitted", now)
     return True
 
@@ -231,7 +232,7 @@ def update_review(contest: dict, payload: dict, now: datetime) -> None:
         raise ContestError("invalid_review", "Проверь заметки и общий вывод.")
     cleaned = {}
     for task_id, value in tasks.items():
-        if task_id not in task_ids() or not isinstance(value, dict):
+        if task_id not in task_ids(assigned_task_set(contest)) or not isinstance(value, dict):
             raise ContestError("invalid_review", "Неизвестная задача в оценке.")
         note = value.get("note", "")
         score = value.get("score")
@@ -252,20 +253,14 @@ def mark_invitation_pending(contest: dict, now: datetime) -> None:
     _touch(contest, "invitation_resent", now)
 
 
-def valid_url(value: str) -> bool:
-    try:
-        parsed = urlparse(value)
-        return parsed.scheme in {"http", "https"} and bool(parsed.netloc) and len(value) <= 1000
-    except (TypeError, ValueError):
-        return False
-
-
 def candidate_view(contest: dict) -> dict:
     return {
         "id": contest["contest_id"],
         "state": contest["state"],
-        "language": contest["language"],
-        "taskSetVersion": contest["task_set_version"],
+        "language": LANGUAGE,
+        "direction": contest.get("direction"),
+        "trackLabel": track_label(assigned_task_set(contest)),
+        "taskSetVersion": assigned_task_set(contest),
         "durationMinutes": contest["duration_minutes"],
         "startBefore": contest["start_before"],
         "serverNow": utcnow(),

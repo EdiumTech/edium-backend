@@ -1,7 +1,10 @@
 const http = require('node:http')
 const { runTask } = require('./sandbox')
+const { LEGACY_TASK_SET_VERSION } = require('./tasks')
 
 const port = Number(process.env.PORT || 8080)
+// JSON escaping can expand a permitted 64 KB source up to sixfold.
+const MAX_REQUEST_BYTES = 6 * 65536 + 4096
 
 function reply(response, status, payload) {
   response.writeHead(status, {
@@ -18,13 +21,15 @@ const server = http.createServer((request, response) => {
   const chunks = []
   request.on('data', chunk => {
     size += chunk.length
-    if (size > 131072) request.destroy()
+    if (size > MAX_REQUEST_BYTES) request.destroy()
     else chunks.push(chunk)
   })
   request.on('end', async () => {
     try {
       const payload = JSON.parse(Buffer.concat(chunks).toString('utf8'))
-      const result = await runTask(payload.taskId, payload.source)
+      if (!payload || (payload.taskSetVersion !== undefined && typeof payload.taskSetVersion !== 'string')) throw new Error('unknown_task')
+      // The previous API did not send a version; it can only address the original set.
+      const result = await runTask(payload.taskId, payload.source, payload.taskSetVersion ?? LEGACY_TASK_SET_VERSION)
       reply(response, 200, result)
     } catch (error) {
       const code = ['unknown_task', 'invalid_source'].includes(error.message) ? 400 : 422
@@ -34,4 +39,6 @@ const server = http.createServer((request, response) => {
   })
 })
 
-server.listen(port, '0.0.0.0')
+if (require.main === module) server.listen(port, '0.0.0.0')
+
+module.exports = { server }

@@ -1,5 +1,5 @@
 const { newQuickJSWASMModule } = require('quickjs-emscripten')
-const { taskSuites } = require('./tasks')
+const { getTaskSuite, LEGACY_TASK_SET_VERSION } = require('./tasks')
 
 const MEMORY_LIMIT = 64 * 1024 * 1024
 const STACK_LIMIT = 512 * 1024
@@ -51,6 +51,10 @@ async function executeTest(QuickJS, source, test) {
       evaluation.error.dispose()
       return { name: test.name, passed: false, message: safeMessage(dumped && dumped.message ? dumped.message : dumped) }
     }
+    if (context.typeof(evaluation.value) !== 'string') {
+      evaluation.value.dispose()
+      return { name: test.name, passed: false, message: 'solve должна вернуть JSON-совместимое значение.' }
+    }
     const json = context.getString(evaluation.value)
     evaluation.value.dispose()
     if (Buffer.byteLength(json, 'utf8') > MAX_RESULT_BYTES) {
@@ -69,15 +73,24 @@ async function executeTest(QuickJS, source, test) {
   }
 }
 
-async function runTask(taskId, source) {
-  if (!Object.hasOwn(taskSuites, taskId)) throw new Error('unknown_task')
+async function runTask(taskId, source, taskSetVersion = LEGACY_TASK_SET_VERSION) {
+  const suite = getTaskSuite(taskSetVersion, taskId)
+  if (!Array.isArray(suite) || !suite.length) throw new Error('unknown_task')
   if (typeof source !== 'string' || Buffer.byteLength(source, 'utf8') > MAX_SOURCE_BYTES) throw new Error('invalid_source')
   const started = Date.now()
   // A separate Wasm module per request keeps linear memory isolated across candidates.
   const QuickJS = await newQuickJSWASMModule()
   const tests = []
-  for (const test of taskSuites[taskId]) tests.push(await executeTest(QuickJS, source, test))
-  return { passed: tests.every(test => test.passed), tests, durationMs: Date.now() - started }
+  for (const test of suite) {
+    try {
+      tests.push(await executeTest(QuickJS, source, test))
+    } catch {
+      // A failed evaluation must not skip later cases or imply they passed.
+      tests.push({ name: test.name, passed: false, message: 'Не удалось выполнить тест. Проверь код и ограничения памяти.' })
+    }
+  }
+  const passed = tests.filter(test => test.passed).length
+  return { passed, total: suite.length, allPassed: passed === suite.length, tests, durationMs: Date.now() - started }
 }
 
 module.exports = { runTask }

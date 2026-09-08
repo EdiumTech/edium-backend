@@ -1,0 +1,11 @@
+**
+!runner/
+!runner/Dockerfile
+!runner/package.json
+!runner/package-lock.json
+!runner/sandbox.js
+!runner/server.js
+!runner/tasks.js
+!functions/
+!functions/app/
+!functions/app/contest_catalog.json

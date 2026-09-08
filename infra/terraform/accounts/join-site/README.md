@@ -28,6 +28,14 @@ The initial admin token is a narrow, server-checked fallback because the existin
 
 The browser never supplies a trusted state, `startedAt`, deadline, or completion time. A five-minute maintenance trigger finalizes inactive expired contests; an active browser also observes and persists expiration on its next request.
 
+## Candidate tasks and execution
+
+New invitations select a task set from the application direction: development, AI/ML, electronics, design, product, marketing, or a general product-work fallback. Both the direction and immutable `task_set_version` are stored at invitation time. Changing the application later does not swap the candidate's tasks. Existing v1 invitations keep their original statements and tests.
+
+Answers contain JavaScript source for `solve(input)` only. Explanations, solution links and solution attachments are not required; submission checks for code in every assigned task. The sandbox executes JavaScript directly, so TypeScript syntax is reported as a syntax error.
+
+`functions/app/contest_catalog.json` is the shared source for statements, examples and complete test suites. Candidate task metadata includes `testCount`. A run executes every test in the assigned suite, including cases not shown as statement examples. Each test gets its own fresh runtime; one exception or timeout does not skip subsequent tests. The response is `{ passed: number, total: number, allPassed: boolean, tests, durationMs }`. The control plane verifies the number of returned cases and derives the counts from their boolean results rather than trusting a summary. The client cannot select another direction, version or task id outside its assignment.
+
 ## Secrets and configuration
 
 - `ADMIN_TOKEN`, `IP_HASH_SALT` and `CONTEST_TOKEN_KEY` are generated sensitive Terraform values. Do not copy them to frontend variables, URLs, logs or test fixtures.
@@ -76,6 +84,8 @@ cd runner && npm ci --ignore-scripts && npm test
 ## Runner image
 
 Run the `Build Join Contest Runner` workflow. It tests the sandbox, pushes an immutable image and prints a digest-pinned URL. Put that exact URL in the production Environment variable `JOIN_RUNNER_IMAGE_URL`; the deployment workflow passes it to Terraform. An empty value deliberately leaves code execution disabled while the rest of the API can be reviewed.
+
+The Docker build context is this `join-site` directory, with `--file runner/Dockerfile`, so the image and API bundle consume the same catalog. Release in this order: matching runner image, API with the new assignments, then frontend. The updated frontend can derive counts from legacy per-test reports during a rolling release.
 
 ## Test deployment
 
@@ -136,6 +146,7 @@ email.
 - double/concurrent start and submit; stale two-tab autosave conflict;
 - deadline while editing or running tests; one allowed extension;
 - empty, long-running, memory-heavy and malicious JavaScript;
+- direction-specific invitations, pinned legacy assignments, source-only submission, complete and partial test counts;
 - runner unavailable and Herald unavailable without losing saved answers;
 - HR answer review, notes, 1–5 scores and conclusion; no auto hiring score;
 - 390 px mobile layout, keyboard order, visible focus and screen-reader errors.

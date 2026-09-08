@@ -3,6 +3,8 @@ import os
 import urllib.error
 import urllib.request
 
+from contest_content import public_tasks
+
 
 class RunnerUnavailable(Exception):
     pass
@@ -16,11 +18,11 @@ class SandboxRunner:
     def enabled(self) -> bool:
         return bool(self.url)
 
-    def run(self, task_id: str, source: str) -> dict:
+    def run(self, task_id: str, source: str, task_set_version: str) -> dict:
         if not self.enabled:
             raise RunnerUnavailable("runner_disabled")
         token = self._iam_token()
-        data = json.dumps({"taskId": task_id, "source": source}).encode("utf-8")
+        data = json.dumps({"taskId": task_id, "source": source, "taskSetVersion": task_set_version}, ensure_ascii=False).encode("utf-8")
         request = urllib.request.Request(
             self.url,
             data=data,
@@ -38,7 +40,8 @@ class SandboxRunner:
                 result = json.loads(response.read(262144).decode("utf-8"))
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError, json.JSONDecodeError) as error:
             raise RunnerUnavailable("runner_unavailable") from error
-        return self._sanitize(result)
+        expected_total = next(task["testCount"] for task in public_tasks(task_set_version) if task["id"] == task_id)
+        return self._sanitize(result, expected_total)
 
     @staticmethod
     def _iam_token() -> str:
@@ -54,22 +57,31 @@ class SandboxRunner:
             raise RunnerUnavailable("iam_token_unavailable") from error
 
     @staticmethod
-    def _sanitize(result: dict) -> dict:
+    def _sanitize(result: dict, expected_total: int) -> dict:
         if not isinstance(result, dict):
             raise RunnerUnavailable("invalid_runner_response")
+        reported_tests = result.get("tests")
+        if not isinstance(reported_tests, list) or len(reported_tests) != expected_total or not 1 <= expected_total <= 20:
+            raise RunnerUnavailable("incomplete_runner_response")
         tests = []
-        for item in result.get("tests", [])[:20]:
-            if not isinstance(item, dict):
-                continue
+        for item in reported_tests:
+            if not isinstance(item, dict) or not isinstance(item.get("passed"), bool):
+                raise RunnerUnavailable("invalid_runner_response")
             tests.append(
                 {
                     "name": str(item.get("name", "Тест"))[:80],
-                    "passed": bool(item.get("passed")),
+                    "passed": item["passed"],
                     "message": str(item.get("message", ""))[:500],
                 }
             )
+        duration = result.get("durationMs", 0)
+        if not isinstance(duration, (int, float)) or not 0 <= duration <= 10000:
+            raise RunnerUnavailable("invalid_runner_response")
+        passed = sum(item["passed"] for item in tests)
         return {
-            "passed": bool(result.get("passed")),
+            "passed": passed,
+            "total": expected_total,
+            "allPassed": passed == expected_total,
             "tests": tests,
-            "durationMs": min(max(int(result.get("durationMs", 0)), 0), 10000),
+            "durationMs": int(duration),
         }

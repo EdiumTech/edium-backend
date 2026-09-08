@@ -7,6 +7,7 @@ import types
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 
 APP_DIR = Path(__file__).parents[1] / "functions" / "app"
@@ -200,7 +201,7 @@ class HandlerTests(unittest.TestCase):
         contest, _ = handler.new_contest(self.upload["upload_id"], 90, now + timedelta(days=1), now)
         token = handler.attach_token_hash(contest, os.environ["CONTEST_TOKEN_KEY"])
         for task_id in handler.task_ids():
-            contest["answers"][task_id] = {"source": "function solve(input) { return input }", "explanation": "Подробное объяснение алгоритма, граничных случаев и сложности решения. " * 4}
+            contest["answers"][task_id] = {"source": "function solve(input) { return input }"}
         handler._repository = FakeContestRepository(contest)
 
         first = handler.api(self.contest_request("POST", "/v1/contest/start", token))
@@ -251,10 +252,9 @@ class HandlerTests(unittest.TestCase):
         self.assertEqual(json.loads(opened["body"])["contest"]["state"], "opened")
         current = json.loads(started["body"])["contest"]
 
-        explanation = "Подробно объясняю алгоритм, граничные случаи, компромиссы и вычислительную сложность решения. " * 4
         for task_id in handler.task_ids():
             saved = handler.api(self.contest_request("PATCH", f"/v1/contest/answers/{task_id}", token, {
-                "source": "function solve(input) { return input }", "explanation": explanation, "revision": current["revision"],
+                "source": "function solve(input) { return input }", "revision": current["revision"],
             }))
             self.assertEqual(saved["statusCode"], 200)
             current = json.loads(saved["body"])["contest"]
@@ -270,6 +270,36 @@ class HandlerTests(unittest.TestCase):
         self.assertEqual(hr_contest["state"], "submitted")
         self.assertEqual(set(hr_contest["answers"]), handler.task_ids())
         self.assertNotIn("token_hash", hr_contest)
+
+    def test_invite_pins_application_direction_and_client_cannot_choose_runner_suite(self):
+        handler._repository = FakeAdminContestRepository()
+        handler._repository.application["direction"] = "Разработка"
+        issued = handler.api({
+            "httpMethod": "POST", "path": f"/v1/admin/applications/{self.upload['upload_id']}/contest",
+            "headers": {"Authorization": "Bearer test-admin-secret"},
+            "body": json.dumps({"direction": "Маркетинг"}),
+        })
+        admin_view = json.loads(issued["body"])["contest"]
+        self.assertEqual(admin_view["direction"], "Разработка")
+        self.assertTrue(admin_view["task_set_version"].endswith("-development"))
+        token = admin_view["inviteUrl"].split("#invite=", 1)[1]
+        handler._repository.application["direction"] = "Маркетинг"
+        started = handler.api(self.contest_request("POST", "/v1/contest/start", token))
+        contest = json.loads(started["body"])["contest"]
+        self.assertEqual(contest["direction"], "Разработка")
+        task_id = contest["tasks"][0]["id"]
+        source = "function solve(input) { return input }"
+        with patch.object(handler.SandboxRunner, "run", return_value={"passed": 2, "total": 8, "tests": []}) as run:
+            result = handler.api(self.contest_request("POST", "/v1/contest/run", token, {
+                "taskId": task_id, "source": source, "taskSetVersion": "edium-js-2026-09-v2-marketing",
+            }))
+            self.assertEqual(result["statusCode"], 200)
+            run.assert_called_once_with(task_id, source, contest["taskSetVersion"])
+            rejected = handler.api(self.contest_request("POST", "/v1/contest/run", token, {
+                "taskId": "ai-evidence", "source": source,
+            }))
+            self.assertEqual(rejected["statusCode"], 404)
+            self.assertEqual(run.call_count, 1)
 
 
 if __name__ == "__main__":

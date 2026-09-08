@@ -12,6 +12,7 @@ from botocore.exceptions import ClientError
 from contest import (
     CONTEST_STATES,
     ContestError,
+    assigned_task_set,
     attach_token_hash,
     candidate_view,
     clone,
@@ -29,8 +30,9 @@ from contest import (
     token_matches,
     update_review,
     utcnow,
+    validate_source,
 )
-from contest_content import public_tasks, task_ids
+from contest_content import public_tasks, task_ids, track_label
 from mailer import Mailer
 from repository import ContestConflict, Repository
 from runner import RunnerUnavailable, SandboxRunner
@@ -211,7 +213,7 @@ def save_idempotent_transition(token: str, contest: dict, etag: str, transition)
 def contest_payload(contest: dict, *, include_tasks: bool = True) -> dict:
     payload = candidate_view(contest)
     if include_tasks:
-        payload["tasks"] = public_tasks()
+        payload["tasks"] = public_tasks(assigned_task_set(contest))
     return payload
 
 
@@ -267,10 +269,12 @@ def run_candidate_tests(event: dict) -> dict:
     payload = body_json(event)
     task_id = payload.get("taskId")
     source = payload.get("source")
-    if task_id not in task_ids() or not isinstance(source, str) or len(source) > 65536:
-        raise ContestError("invalid_source", "Проверь задачу и размер исходного кода.")
+    version = assigned_task_set(contest)
+    if not isinstance(task_id, str) or task_id not in task_ids(version):
+        raise ContestError("unknown_task", "Задача не найдена.", 404)
+    validate_source(source)
     try:
-        result = SandboxRunner().run(task_id, source)
+        result = SandboxRunner().run(task_id, source, version)
     except RunnerUnavailable as error:
         raise ContestError("runner_unavailable", "Песочница временно недоступна. Код сохранён; попробуй позже.", 503) from error
     return response(200, {"result": result}, event)
@@ -290,7 +294,8 @@ def admin_contest_view(contest: dict, application: dict) -> dict:
     result["applicationId"] = result.pop("application_id")
     result["inviteUrl"] = invite_url(contest) if contest["state"] not in {"submitted", "expired", "revoked"} else None
     result["hasEmail"] = bool(application.get("email"))
-    result["tasks"] = public_tasks()
+    result["tasks"] = public_tasks(assigned_task_set(contest))
+    result["trackLabel"] = track_label(assigned_task_set(contest))
     return result
 
 
@@ -428,7 +433,8 @@ def admin_contest_route(event: dict, method: str, application: dict, action: str
         if not isinstance(duration, int) or not isinstance(start_within_days, int) or start_within_days < 1 or start_within_days > 30:
             raise ContestError("invalid_invitation", "Проверь продолжительность и срок начала.")
         contest, _ = new_contest(
-            application["application_id"], duration, now + timedelta(days=start_within_days), now
+            application["application_id"], duration, now + timedelta(days=start_within_days), now,
+            direction=application.get("direction"),
         )
         attach_token_hash(contest, os.environ["CONTEST_TOKEN_KEY"])
         if not application.get("email"):
