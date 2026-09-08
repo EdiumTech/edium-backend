@@ -1,321 +1,210 @@
+import hashlib
+import json
 import os
 from datetime import datetime, timezone
 
-import ydb
+import boto3
+from botocore.config import Config
+from botocore.exceptions import ClientError
 
 
-SCHEMA = [
-    """
-    CREATE TABLE IF NOT EXISTS uploads (
-      upload_id Utf8 NOT NULL,
-      object_key Utf8 NOT NULL,
-      original_name Utf8 NOT NULL,
-      declared_type Utf8 NOT NULL,
-      size_bytes Uint64 NOT NULL,
-      status Utf8 NOT NULL,
-      created_at Timestamp NOT NULL,
-      expires_at Timestamp NOT NULL,
-      application_id Utf8,
-      PRIMARY KEY (upload_id)
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS applications (
-      application_id Utf8 NOT NULL,
-      created_at Timestamp NOT NULL,
-      updated_at Timestamp NOT NULL,
-      first_name Utf8 NOT NULL,
-      last_name Utf8 NOT NULL,
-      telegram Utf8 NOT NULL,
-      phone Utf8 NOT NULL,
-      email Utf8,
-      direction Utf8,
-      motivation Utf8 NOT NULL,
-      portfolio_url Utf8,
-      resume_object_key Utf8 NOT NULL,
-      resume_name Utf8 NOT NULL,
-      resume_size Uint64 NOT NULL,
-      resume_media_type Utf8 NOT NULL,
-      status Utf8 NOT NULL,
-      team_notification_status Utf8 NOT NULL,
-      candidate_notification_status Utf8 NOT NULL,
-      notify_attempts Uint32 NOT NULL,
-      next_notify_at Timestamp NOT NULL,
-      PRIMARY KEY (application_id),
-      INDEX applications_by_status GLOBAL ON (status, created_at)
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS rate_limits (
-      bucket_key Utf8 NOT NULL,
-      request_count Uint32 NOT NULL,
-      expires_at Timestamp NOT NULL,
-      PRIMARY KEY (bucket_key)
-    )
-    """,
-]
+DATE_FIELDS = {"created_at", "updated_at", "expires_at", "next_notify_at"}
 
 
-def _rows(result_sets):
-    return result_sets[0].rows if result_sets else []
+def _json_default(value):
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    raise TypeError(f"Unsupported JSON value: {type(value)!r}")
 
 
-def _as_dict(row) -> dict:
-    return {key: value for key, value in row.items()}
+def _decode_dates(payload: dict) -> dict:
+    for field in DATE_FIELDS:
+        value = payload.get(field)
+        if isinstance(value, str):
+            payload[field] = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return payload
 
 
 class Repository:
+    """Small-volume application metadata stored beside resumes in private S3.
+
+    Object keys are deterministic, so retried requests overwrite the same record
+    instead of creating duplicates. Herald provides a second idempotency boundary
+    for email delivery.
+    """
+
     def __init__(self):
-        self.driver = ydb.Driver(
-            endpoint=os.environ["YDB_ENDPOINT"],
-            database=os.environ["YDB_DATABASE"],
-            credentials=ydb.iam.MetadataUrlCredentials(),
+        self.bucket = os.environ["RESUME_BUCKET"]
+        self.client = boto3.client(
+            "s3",
+            endpoint_url="https://storage.yandexcloud.net",
+            region_name="ru-central1",
+            aws_access_key_id=os.environ["S3_ACCESS_KEY"],
+            aws_secret_access_key=os.environ["S3_SECRET_KEY"],
+            config=Config(
+                signature_version="s3v4",
+                retries={"max_attempts": 3, "mode": "standard"},
+            ),
         )
-        self.driver.wait(fail_fast=True, timeout=8)
-        self.pool = ydb.SessionPool(self.driver, size=5)
-        self._schema_ready = False
 
     def ensure_schema(self) -> None:
-        if self._schema_ready:
-            return
-        for statement in SCHEMA:
-            self.pool.retry_operation_sync(lambda session, query=statement: session.execute_scheme(query))
-        self._schema_ready = True
+        return None
+
+    def _get(self, key: str) -> dict | None:
+        try:
+            body = self.client.get_object(Bucket=self.bucket, Key=key)["Body"].read()
+        except ClientError as error:
+            code = str(error.response.get("Error", {}).get("Code", ""))
+            if code in {"NoSuchKey", "NoSuchObject", "404"}:
+                return None
+            raise
+        return _decode_dates(json.loads(body.decode("utf-8")))
+
+    def _put(self, key: str, payload: dict) -> None:
+        body = json.dumps(payload, ensure_ascii=False, default=_json_default).encode("utf-8")
+        self.client.put_object(
+            Bucket=self.bucket,
+            Key=key,
+            Body=body,
+            ContentType="application/json; charset=utf-8",
+            CacheControl="no-store",
+        )
+
+    def _delete(self, key: str) -> None:
+        self.client.delete_object(Bucket=self.bucket, Key=key)
+
+    def _list(self, prefix: str) -> list[dict]:
+        rows = []
+        continuation_token = None
+        while True:
+            params = {"Bucket": self.bucket, "Prefix": prefix, "MaxKeys": 1000}
+            if continuation_token:
+                params["ContinuationToken"] = continuation_token
+            page = self.client.list_objects_v2(**params)
+            for item in page.get("Contents", []):
+                value = self._get(item["Key"])
+                if value is not None:
+                    rows.append(value)
+            if not page.get("IsTruncated"):
+                return rows
+            continuation_token = page["NextContinuationToken"]
+
+    @staticmethod
+    def _upload_key(upload_id: str) -> str:
+        return f"metadata/uploads/{upload_id}.json"
+
+    @staticmethod
+    def _application_key(application_id: str) -> str:
+        return f"metadata/applications/{application_id}.json"
 
     def allow_request(self, bucket_key: str, expires_at: datetime, limit: int) -> bool:
-        query = """
-        DECLARE $bucket_key AS Utf8;
-        DECLARE $expires_at AS Timestamp;
-        SELECT request_count, expires_at FROM rate_limits WHERE bucket_key = $bucket_key;
-        """
-        upsert = """
-        DECLARE $bucket_key AS Utf8;
-        DECLARE $request_count AS Uint32;
-        DECLARE $expires_at AS Timestamp;
-        UPSERT INTO rate_limits (bucket_key, request_count, expires_at)
-        VALUES ($bucket_key, $request_count, $expires_at);
-        """
-
-        def operation(session):
-            transaction = session.transaction(ydb.SerializableReadWrite()).begin()
-            rows = _rows(transaction.execute(query, {"$bucket_key": bucket_key, "$expires_at": expires_at}))
-            now = datetime.now(timezone.utc)
-            count = 0
-            if rows and rows[0].expires_at > now:
-                count = int(rows[0].request_count)
-            if count >= limit:
-                transaction.rollback()
-                return False
-            transaction.execute(
-                upsert,
-                {"$bucket_key": bucket_key, "$request_count": count + 1, "$expires_at": expires_at},
-                commit_tx=True,
-            )
-            return True
-
-        return self.pool.retry_operation_sync(operation)
+        digest = hashlib.sha256(bucket_key.encode()).hexdigest()
+        key = f"metadata/rate-limits/{digest}.json"
+        now = datetime.now(timezone.utc)
+        record = self._get(key)
+        count = 0
+        if record and record["expires_at"] > now:
+            count = int(record["request_count"])
+        if count >= limit:
+            return False
+        self._put(key, {"request_count": count + 1, "expires_at": expires_at})
+        return True
 
     def get_upload(self, upload_id: str) -> dict | None:
-        query = """
-        DECLARE $upload_id AS Utf8;
-        SELECT * FROM uploads WHERE upload_id = $upload_id;
-        """
-        rows = self.pool.retry_operation_sync(
-            lambda session: _rows(session.transaction().execute(query, {"$upload_id": upload_id}, commit_tx=True))
-        )
-        return _as_dict(rows[0]) if rows else None
+        return self._get(self._upload_key(upload_id))
 
     def create_upload(self, upload: dict) -> None:
-        query = """
-        DECLARE $upload_id AS Utf8;
-        DECLARE $object_key AS Utf8;
-        DECLARE $original_name AS Utf8;
-        DECLARE $declared_type AS Utf8;
-        DECLARE $size_bytes AS Uint64;
-        DECLARE $status AS Utf8;
-        DECLARE $created_at AS Timestamp;
-        DECLARE $expires_at AS Timestamp;
-        UPSERT INTO uploads
-          (upload_id, object_key, original_name, declared_type, size_bytes, status, created_at, expires_at)
-        VALUES
-          ($upload_id, $object_key, $original_name, $declared_type, $size_bytes, $status, $created_at, $expires_at);
-        """
-        params = {f"${key}": value for key, value in upload.items()}
-        self.pool.retry_operation_sync(lambda session: session.transaction().execute(query, params, commit_tx=True))
+        self._put(self._upload_key(upload["upload_id"]), upload)
 
     def finalize_application(self, upload_id: str, application: dict) -> tuple[dict, bool]:
-        select_query = """
-        DECLARE $upload_id AS Utf8;
-        SELECT status, application_id FROM uploads WHERE upload_id = $upload_id;
-        """
-        existing_query = """
-        DECLARE $application_id AS Utf8;
-        SELECT * FROM applications WHERE application_id = $application_id;
-        """
-        write_query = """
-        DECLARE $application_id AS Utf8;
-        DECLARE $created_at AS Timestamp;
-        DECLARE $updated_at AS Timestamp;
-        DECLARE $first_name AS Utf8;
-        DECLARE $last_name AS Utf8;
-        DECLARE $telegram AS Utf8;
-        DECLARE $phone AS Utf8;
-        DECLARE $email AS Utf8?;
-        DECLARE $direction AS Utf8?;
-        DECLARE $motivation AS Utf8;
-        DECLARE $portfolio_url AS Utf8?;
-        DECLARE $resume_object_key AS Utf8;
-        DECLARE $resume_name AS Utf8;
-        DECLARE $resume_size AS Uint64;
-        DECLARE $resume_media_type AS Utf8;
-        DECLARE $status AS Utf8;
-        DECLARE $team_notification_status AS Utf8;
-        DECLARE $candidate_notification_status AS Utf8;
-        DECLARE $notify_attempts AS Uint32;
-        DECLARE $next_notify_at AS Timestamp;
-        DECLARE $upload_id AS Utf8;
-        UPSERT INTO applications (
-          application_id, created_at, updated_at, first_name, last_name, telegram, phone, email,
-          direction, motivation, portfolio_url, resume_object_key, resume_name, resume_size,
-          resume_media_type, status, team_notification_status, candidate_notification_status,
-          notify_attempts, next_notify_at
-        ) VALUES (
-          $application_id, $created_at, $updated_at, $first_name, $last_name, $telegram, $phone, $email,
-          $direction, $motivation, $portfolio_url, $resume_object_key, $resume_name, $resume_size,
-          $resume_media_type, $status, $team_notification_status, $candidate_notification_status,
-          $notify_attempts, $next_notify_at
-        );
-        UPDATE uploads SET status = "attached", application_id = $application_id WHERE upload_id = $upload_id;
-        """
+        upload = self.get_upload(upload_id)
+        if not upload:
+            raise KeyError("upload_not_found")
+        if upload["status"] == "attached" and upload.get("application_id"):
+            existing = self.get_application(upload["application_id"])
+            if not existing:
+                raise RuntimeError("attached_application_missing")
+            return existing, False
+        if upload["status"] != "pending":
+            raise ValueError("upload_not_pending")
 
-        def operation(session):
-            transaction = session.transaction(ydb.SerializableReadWrite()).begin()
-            upload_rows = _rows(transaction.execute(select_query, {"$upload_id": upload_id}))
-            if not upload_rows:
-                transaction.rollback()
-                raise KeyError("upload_not_found")
-            upload = upload_rows[0]
-            if upload.status == "attached" and upload.application_id:
-                existing_rows = _rows(transaction.execute(existing_query, {"$application_id": upload.application_id}))
-                transaction.rollback()
-                if not existing_rows:
-                    raise RuntimeError("attached_application_missing")
-                return _as_dict(existing_rows[0]), False
-            if upload.status != "pending":
-                transaction.rollback()
-                raise ValueError("upload_not_pending")
-            params = {f"${key}": value for key, value in application.items()}
-            params["$upload_id"] = upload_id
-            transaction.execute(write_query, params, commit_tx=True)
-            return application, True
-
-        return self.pool.retry_operation_sync(operation)
+        existing = self.get_application(application["application_id"])
+        created = existing is None
+        if created:
+            self._put(self._application_key(application["application_id"]), application)
+        else:
+            application = existing
+        upload["status"] = "attached"
+        upload["application_id"] = application["application_id"]
+        self._put(self._upload_key(upload_id), upload)
+        return application, created
 
     def list_applications(self, status: str | None = None) -> list[dict]:
-        if status:
-            query = """
-            DECLARE $status AS Utf8;
-            SELECT application_id, created_at, first_name, last_name, direction, status
-            FROM applications VIEW applications_by_status
-            WHERE status = $status
-            ORDER BY status, created_at DESC LIMIT 100;
-            """
-            params = {"$status": status}
-        else:
-            query = """
-            SELECT application_id, created_at, first_name, last_name, direction, status
-            FROM applications WHERE status != "deleting" ORDER BY created_at DESC LIMIT 100;
-            """
-            params = {}
-        rows = self.pool.retry_operation_sync(
-            lambda session: _rows(session.transaction().execute(query, params, commit_tx=True))
-        )
-        return [_as_dict(row) for row in rows]
+        rows = [
+            item
+            for item in self._list("metadata/applications/")
+            if item.get("status") != "deleting" and (not status or item.get("status") == status)
+        ]
+        rows.sort(key=lambda item: item["created_at"], reverse=True)
+        return rows[:100]
 
     def get_application(self, application_id: str) -> dict | None:
-        query = """
-        DECLARE $application_id AS Utf8;
-        SELECT * FROM applications WHERE application_id = $application_id;
-        """
-        rows = self.pool.retry_operation_sync(
-            lambda session: _rows(session.transaction().execute(query, {"$application_id": application_id}, commit_tx=True))
-        )
-        return _as_dict(rows[0]) if rows else None
+        return self._get(self._application_key(application_id))
 
     def update_status(self, application_id: str, status: str, updated_at: datetime) -> bool:
-        if not self.get_application(application_id):
+        application = self.get_application(application_id)
+        if not application:
             return False
-        query = """
-        DECLARE $application_id AS Utf8;
-        DECLARE $status AS Utf8;
-        DECLARE $updated_at AS Timestamp;
-        UPDATE applications SET status = $status, updated_at = $updated_at
-        WHERE application_id = $application_id;
-        """
-        self.pool.retry_operation_sync(
-            lambda session: session.transaction().execute(
-                query, {"$application_id": application_id, "$status": status, "$updated_at": updated_at}, commit_tx=True
-            )
-        )
+        application["status"] = status
+        application["updated_at"] = updated_at
+        self._put(self._application_key(application_id), application)
         return True
 
     def mark_deleting(self, application_id: str, updated_at: datetime) -> dict | None:
         application = self.get_application(application_id)
         if not application:
             return None
-        self.update_status(application_id, "deleting", updated_at)
+        application["status"] = "deleting"
+        application["updated_at"] = updated_at
+        self._put(self._application_key(application_id), application)
         return application
 
     def purge_application(self, application_id: str) -> None:
-        query = """
-        DECLARE $application_id AS Utf8;
-        DELETE FROM applications WHERE application_id = $application_id;
-        DELETE FROM uploads WHERE application_id = $application_id;
-        """
-        self.pool.retry_operation_sync(
-            lambda session: session.transaction().execute(query, {"$application_id": application_id}, commit_tx=True)
-        )
+        self._delete(self._application_key(application_id))
+        self._delete(self._upload_key(application_id))
 
     def expired_uploads(self, now: datetime) -> list[dict]:
-        query = """
-        DECLARE $now AS Timestamp;
-        SELECT upload_id, object_key FROM uploads WHERE status = "pending" AND expires_at < $now LIMIT 100;
-        """
-        rows = self.pool.retry_operation_sync(
-            lambda session: _rows(session.transaction().execute(query, {"$now": now}, commit_tx=True))
-        )
-        return [_as_dict(row) for row in rows]
+        return [
+            item
+            for item in self._list("metadata/uploads/")
+            if item.get("status") == "pending" and item["expires_at"] < now
+        ][:100]
 
     def delete_upload(self, upload_id: str) -> None:
-        query = """
-        DECLARE $upload_id AS Utf8;
-        DELETE FROM uploads WHERE upload_id = $upload_id AND status = "pending";
-        """
-        self.pool.retry_operation_sync(
-            lambda session: session.transaction().execute(query, {"$upload_id": upload_id}, commit_tx=True)
-        )
+        upload = self.get_upload(upload_id)
+        if upload and upload.get("status") == "pending":
+            self._delete(self._upload_key(upload_id))
 
     def deleting_applications(self) -> list[dict]:
-        query = """
-        SELECT application_id, resume_object_key FROM applications WHERE status = "deleting" LIMIT 100;
-        """
-        rows = self.pool.retry_operation_sync(
-            lambda session: _rows(session.transaction().execute(query, commit_tx=True))
-        )
-        return [_as_dict(row) for row in rows]
+        return [
+            item
+            for item in self._list("metadata/applications/")
+            if item.get("status") == "deleting"
+        ][:100]
 
     def pending_notifications(self, now: datetime) -> list[dict]:
-        query = """
-        DECLARE $now AS Timestamp;
-        SELECT * FROM applications
-        WHERE (team_notification_status = "pending" OR candidate_notification_status = "pending")
-          AND next_notify_at <= $now AND status != "deleting"
-        ORDER BY next_notify_at LIMIT 50;
-        """
-        rows = self.pool.retry_operation_sync(
-            lambda session: _rows(session.transaction().execute(query, {"$now": now}, commit_tx=True))
-        )
-        return [_as_dict(row) for row in rows]
+        rows = [
+            item
+            for item in self._list("metadata/applications/")
+            if item.get("status") != "deleting"
+            and item["next_notify_at"] <= now
+            and (
+                item.get("team_notification_status") == "pending"
+                or item.get("candidate_notification_status") == "pending"
+            )
+        ]
+        rows.sort(key=lambda item: item["next_notify_at"])
+        return rows[:50]
 
     def update_notifications(
         self,
@@ -326,24 +215,15 @@ class Repository:
         attempts: int,
         next_attempt_at: datetime,
     ) -> None:
-        query = """
-        DECLARE $application_id AS Utf8;
-        DECLARE $team_status AS Utf8;
-        DECLARE $candidate_status AS Utf8;
-        DECLARE $attempts AS Uint32;
-        DECLARE $next_attempt_at AS Timestamp;
-        UPDATE applications SET
-          team_notification_status = $team_status,
-          candidate_notification_status = $candidate_status,
-          notify_attempts = $attempts,
-          next_notify_at = $next_attempt_at
-        WHERE application_id = $application_id;
-        """
-        params = {
-            "$application_id": application_id,
-            "$team_status": team_status,
-            "$candidate_status": candidate_status,
-            "$attempts": attempts,
-            "$next_attempt_at": next_attempt_at,
-        }
-        self.pool.retry_operation_sync(lambda session: session.transaction().execute(query, params, commit_tx=True))
+        application = self.get_application(application_id)
+        if not application:
+            return
+        application.update(
+            {
+                "team_notification_status": team_status,
+                "candidate_notification_status": candidate_status,
+                "notify_attempts": attempts,
+                "next_notify_at": next_attempt_at,
+            }
+        )
+        self._put(self._application_key(application_id), application)

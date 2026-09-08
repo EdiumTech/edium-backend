@@ -48,6 +48,8 @@ jobs:
           printf '%s' '${{ secrets.TF_VARS_PLATFORM }}' > platform.tfvars
           grep -E '^[[:space:]]*(cloud_id|folder_id)[[:space:]]*=' platform.tfvars > terraform.tfvars
           test "$(wc -l < terraform.tfvars)" -eq 2
+          INVOKER_SERVICE_ACCOUNT_ID="$(python3 -c 'import json; print(json.load(open("key.json"))["service_account_id"])')"
+          printf 'invoker_service_account_id = "%s"\n' "$INVOKER_SERVICE_ACCOUNT_ID" >> terraform.tfvars
           cat >> terraform.tfvars <<'EOF'
           resume_bucket_name = "edium-team-applications"
           email_mode         = "herald"

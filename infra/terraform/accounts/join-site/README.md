@@ -1,12 +1,12 @@
 # Edium team applications — isolated serverless stack
 
-This directory is intentionally independent from `accounts/platform`. It has its own Terraform state key (`join-site.tfstate`) and declares **no Compute Cloud resources, VPCs, Managed PostgreSQL, or Redis**.
+This directory is intentionally independent from `accounts/platform`. It has its own Terraform state key (`join-site.tfstate`). The runtime architecture uses **no Compute Cloud resources, VPCs, databases, Lockbox secrets, Managed PostgreSQL, or Redis**. A temporary YDB declaration only disables deletion protection after the interrupted first apply and is removed in the following cleanup revision.
 
 ## Architecture
 
-1. `POST /v1/uploads` validates file metadata, honeypot and rate limit, then creates a one-hour upload record in Serverless YDB and returns a 10-minute presigned POST.
+1. `POST /v1/uploads` validates file metadata, honeypot and rate limit, then creates a one-hour metadata record in the private Object Storage bucket and returns a 10-minute presigned POST.
 2. The browser uploads the file directly to the private Object Storage bucket. This bypasses the 2.5 MB API Gateway request limit while keeping the 10 MB product limit.
-3. `POST /v1/applications` downloads the private object inside the function, verifies its exact size and actual PDF/DOCX structure, and atomically attaches it to the YDB application record.
+3. `POST /v1/applications` downloads the private object inside the function, verifies its exact size and actual PDF/DOCX structure, and attaches it to the application metadata record in the same private bucket.
 4. The saved row contains an outbox state. A timer invokes the maintenance function every five minutes and queues email in the existing Herald service. Herald/API/SMTP failures are retried with exponential backoff and never roll back the application.
 5. `/join/admin/` sends a bearer token only in request headers. The API checks it server-side before listing data or issuing a 60-second resume download URL. The browser does not persist the token.
 6. The same maintenance function deletes one-hour orphan uploads and completes interrupted application deletions.
@@ -17,12 +17,12 @@ The initial admin token is a narrow, server-checked fallback because the existin
 
 - The resume bucket is private; public read/list/config access is explicitly disabled.
 - Upload and download URLs expire after 10 minutes and 60 seconds respectively.
-- Object keys are random and do not contain the original filename. The original filename exists only as YDB metadata.
+- Object keys are opaque and do not contain the original filename. The original filename exists only in private JSON metadata.
 - Both declared metadata and actual file bytes are checked. A DOCX must be a valid ZIP with Word document members; a PDF needs PDF header and EOF markers.
 - Rate-limit keys are HMAC hashes of IP + action + window. Raw IP addresses and application contents are not written to technical logs.
-- YDB transactions make the upload ID the application ID, so retrying a completed request returns success without creating a second application.
-- All runtime credentials and the admin token are injected from Lockbox. The Terraform state also contains generated/static secret material and must remain in the private state bucket with restricted IAM.
-- The YDB throughput cap is 10 RU/s and its maximum storage is 1 GB to bound accidental spend.
+- Deterministic upload/application keys make a retried completed request return success without creating a second application. Herald provides an independent idempotency boundary for email.
+- Runtime credentials and the admin token are injected from sensitive Terraform values into encrypted function configuration. The Terraform state contains generated/static secret material and must remain in the private state bucket with restricted IAM.
+- The bucket has a 1 GB size cap to bound accidental spend.
 
 ## Prerequisites
 
@@ -106,18 +106,16 @@ email.
 
 ## Data deletion and stack removal
 
-Delete one candidate from `/join/admin/`; the API marks the row, removes the object and then purges the database record. The maintenance run completes an interrupted deletion.
+Delete one candidate from `/join/admin/`; the API marks the metadata record, removes the resume and then purges the metadata. The maintenance run completes an interrupted deletion.
 
-Do not use `terraform destroy` while applications remain. Export or delete applications first, verify that the bucket is empty, then set YDB `deletion_protection = false`, apply that change, review a destroy plan, and only then destroy this isolated state. `force_destroy = false` prevents accidental resume loss.
+Do not use `terraform destroy` while applications remain. Export or delete applications first, verify that the bucket is empty, review a destroy plan, and only then destroy this isolated state. `force_destroy = false` prevents accidental resume loss.
 
 ## Cost assumptions
 
 Assume 100 applications/month, an average 2 MB resume, 500 administrative reads, two public API calls per application and a five-minute maintenance timer (~8,640 calls/month):
 
 - API Gateway and function invocation/compute are expected to remain within their monthly free tiers.
-- YDB operations and under 1 GB of data are expected to remain within the small serverless free allowances.
-- Object Storage stays below its first free 1 GB with these assumptions.
-- One Lockbox secret version is the predictable fixed cost: about 19.73 RUB/month at the documented Russia-region example rate (`720 × 0.0274 RUB`), plus negligible reads.
+- Object Storage stays below its first free 1 GB with these assumptions; request charges should be negligible at this volume.
 - SMTP/provider charges and outgoing resume downloads depend on the selected provider and actual usage.
 
 Recalculate before production if expected application volume, retention, or average resume size changes.

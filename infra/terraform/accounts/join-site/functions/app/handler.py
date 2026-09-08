@@ -145,7 +145,7 @@ def create_upload(event: dict) -> dict:
             "size": existing["size_bytes"],
         }
     else:
-        object_key = f"pending/{uuid.uuid4().hex}"
+        object_key = f"pending/{upload_id}"
         repository().create_upload(
             {
                 "upload_id": upload_id,
