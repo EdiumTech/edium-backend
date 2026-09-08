@@ -63,6 +63,15 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.TF_S3_SECRET_KEY }}
         run: terraform init
 
+      - name: Очистка незавершённой версии Lockbox из state
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.TF_S3_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.TF_S3_SECRET_KEY }}
+        run: |
+          if terraform state list | grep -qx 'yandex_lockbox_secret_version.runtime'; then
+            terraform state rm yandex_lockbox_secret_version.runtime
+          fi
+
       - name: Terraform plan
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.TF_S3_ACCESS_KEY }}
