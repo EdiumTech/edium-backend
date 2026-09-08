@@ -24,9 +24,37 @@ storage_for_test = importlib.util.module_from_spec(storage_spec)
 storage_spec.loader.exec_module(storage_for_test)
 detect_resume_type = storage_for_test.detect_resume_type
 from validation import DOCX_TYPE, PDF_TYPE, ValidationError, normalize_phone, normalize_telegram, validate_application, validate_upload
+from contest_content import ACTIVE_DIRECTIONS
 
 
 class ValidationTests(unittest.TestCase):
+    def valid_application(self):
+        return {
+            "uploadId": "1d0a3842-8fb8-4270-b552-2c28910f1538", "firstName": "Анна", "lastName": "Тестова",
+            "telegram": "@annatest", "phone": "+4915123456789", "direction": "Бэкенд",
+            "motivation": "Хочу создавать понятные и надёжные продукты вместе с командой Edium.",
+        }
+
+    def test_application_accepts_exactly_the_five_active_directions(self):
+        for direction in ACTIVE_DIRECTIONS:
+            payload = self.valid_application()
+            payload["direction"] = direction
+            self.assertEqual(validate_application(payload)["direction"], direction)
+
+    def test_application_requires_direction_and_rejects_retired_or_arbitrary_values(self):
+        for direction in (None, "", " ", "Дизайн", "Разработка", "Продукт", "Маркетинг", "Электроника", "Python", {}, ["Бэкенд"]):
+            with self.subTest(direction=direction):
+                payload = self.valid_application()
+                payload["direction"] = direction
+                with self.assertRaises(ValidationError) as error:
+                    validate_application(payload)
+                self.assertEqual(error.exception.field_errors, {"direction": "Выбери направление из списка."})
+        payload = self.valid_application()
+        del payload["direction"]
+        with self.assertRaises(ValidationError) as error:
+            validate_application(payload)
+        self.assertIn("direction", error.exception.field_errors)
+
     def test_normalizes_telegram_link(self):
         self.assertEqual(normalize_telegram("https://t.me/Edium_team"), "@Edium_team")
 

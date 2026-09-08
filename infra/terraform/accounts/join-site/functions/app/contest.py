@@ -5,7 +5,7 @@ import hmac
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
-from contest_content import LANGUAGE, LEGACY_TASK_SET_VERSION, public_tasks, resolve_task_set, task_ids, track_label
+from contest_content import LEGACY_TASK_SET_VERSION, public_tasks, resolve_task_set, task_ids, track_label, supported_languages
 
 
 CONTEST_STATES = {"invited", "opened", "started", "submitted", "expired", "revoked"}
@@ -68,6 +68,17 @@ def assigned_task_set(contest: dict) -> str:
     return contest.get("task_set_version") or LEGACY_TASK_SET_VERSION
 
 
+def answer_language(contest: dict, task_id: str, language: str | None = None) -> str:
+    task = next((task for task in public_tasks(assigned_task_set(contest)) if task["id"] == task_id), None)
+    if task is None:
+        raise ContestError("unknown_task", "Задача не найдена.", 404)
+    allowed = task.get("languages", {"javascript": {}})
+    selected = language if language is not None else task.get("defaultLanguage", "javascript")
+    if not isinstance(selected, str) or selected not in allowed:
+        raise ContestError("invalid_language", "Выбери язык, разрешённый для этой задачи.")
+    return selected
+
+
 def new_contest(application_id: str, duration_minutes: int, start_before: datetime, now: datetime | None = None, *, direction: str | None = None) -> tuple[dict, str]:
     now = now or utcnow()
     if duration_minutes < 15 or duration_minutes > 240:
@@ -77,13 +88,15 @@ def new_contest(application_id: str, duration_minutes: int, start_before: dateti
     # One stable key per application makes concurrent invitation creation safe:
     # both requests compete on the same conditional Object Storage write.
     contest_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"edium-contest:{application_id}"))
+    version = resolve_task_set(direction)
+    languages = supported_languages(version)
     # The key is supplied by the caller after creation, so the stored record never contains the raw token.
     record = {
         "contest_id": contest_id,
         "application_id": application_id,
-        "task_set_version": resolve_task_set(direction),
+        "task_set_version": version,
         "direction": direction,
-        "language": LANGUAGE,
+        "language": languages[0] if len(languages) == 1 else "mixed",
         "state": "invited",
         "duration_minutes": duration_minutes,
         "start_before": start_before,
@@ -173,10 +186,11 @@ def save_answer(contest: dict, task_id: str, payload: dict, expected_revision: i
     if task_id not in task_ids(assigned_task_set(contest)):
         raise ContestError("unknown_task", "Задача не найдена.", 404)
     source = payload.get("source")
+    language = answer_language(contest, task_id, payload.get("language"))
     validate_source(source)
     previous = contest["answers"].get(task_id)
-    next_answer = {"source": source, "updated_at": now}
-    if previous and previous.get("source") == source:
+    next_answer = {"source": source, "language": language, "updated_at": now}
+    if previous and previous.get("source") == source and previous.get("language", "javascript") == language:
         return False
     contest["answers"][task_id] = next_answer
     _touch(contest, f"answer_saved:{task_id}", now, audit=False)
@@ -194,6 +208,7 @@ def submit_contest(contest: dict, now: datetime) -> bool:
         answer = contest.get("answers", {}).get(task["id"], {})
         if not str(answer.get("source", "")).strip():
             raise ContestError("incomplete", f"Добавь решение задачи «{task['title']}». ", 409)
+        answer_language(contest, task["id"], answer.get("language", "javascript"))
     _finish(contest, "submitted", now)
     return True
 
@@ -254,10 +269,12 @@ def mark_invitation_pending(contest: dict, now: datetime) -> None:
 
 
 def candidate_view(contest: dict) -> dict:
+    languages = supported_languages(assigned_task_set(contest))
     return {
         "id": contest["contest_id"],
         "state": contest["state"],
-        "language": LANGUAGE,
+        "language": languages[0] if len(languages) == 1 else "mixed",
+        "languages": languages,
         "direction": contest.get("direction"),
         "trackLabel": track_label(assigned_task_set(contest)),
         "taskSetVersion": assigned_task_set(contest),

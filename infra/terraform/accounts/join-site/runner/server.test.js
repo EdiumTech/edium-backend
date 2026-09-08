@@ -20,4 +20,9 @@ test('HTTP runner supports legacy callers and rejects other-assignment tasks', a
   })
   assert.equal(wrongAssignment.status, 400)
   assert.deepEqual(await wrongAssignment.json(), { message: 'unknown_task' })
+  const wrongLanguage = await post({
+    taskId: 'mobile-outbox-cat', source: 'function solve() {}', taskSetVersion: 'edium-mobile-2026-09-v3', language: 'javascript',
+  })
+  assert.equal(wrongLanguage.status, 400)
+  assert.deepEqual(await wrongLanguage.json(), { message: 'invalid_language' })
 })

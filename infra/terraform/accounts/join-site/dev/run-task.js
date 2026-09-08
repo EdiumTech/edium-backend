@@ -1,6 +1,6 @@
-// Local transport only. Candidate JavaScript is evaluated by the same QuickJS
-// sandbox as production, never by Node's eval/vm/Function APIs.
-const { runTask } = require('../runner/sandbox')
+// Local transport only. Every language uses the same dispatcher and isolated
+// execution path as production; Node never evaluates candidate source.
+const { runSubmission } = require('../runner/dispatcher')
 
 let size = 0
 const chunks = []
@@ -11,10 +11,11 @@ process.stdin.on('data', chunk => {
 })
 process.stdin.on('end', async () => {
   try {
-    const { taskId, source, taskSetVersion } = JSON.parse(Buffer.concat(chunks).toString('utf8'))
-    const result = await runTask(taskId, source, taskSetVersion)
+    const { taskId, source, taskSetVersion, language = 'javascript' } = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+    const result = await runSubmission(taskId, source, taskSetVersion, language)
     process.stdout.write(JSON.stringify(result))
-  } catch {
-    process.exitCode = 1
+  } catch (error) {
+    if (error?.code === 'runtime_unavailable') process.stdout.write(JSON.stringify({ error: 'runtime_unavailable' }))
+    else process.exitCode = 1
   }
 })

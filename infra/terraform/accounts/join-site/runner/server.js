@@ -1,5 +1,5 @@
 const http = require('node:http')
-const { runTask } = require('./sandbox')
+const { runSubmission } = require('./dispatcher')
 const { LEGACY_TASK_SET_VERSION } = require('./tasks')
 
 const port = Number(process.env.PORT || 8080)
@@ -29,12 +29,12 @@ const server = http.createServer((request, response) => {
       const payload = JSON.parse(Buffer.concat(chunks).toString('utf8'))
       if (!payload || (payload.taskSetVersion !== undefined && typeof payload.taskSetVersion !== 'string')) throw new Error('unknown_task')
       // The previous API did not send a version; it can only address the original set.
-      const result = await runTask(payload.taskId, payload.source, payload.taskSetVersion ?? LEGACY_TASK_SET_VERSION)
+      const result = await runSubmission(payload.taskId, payload.source, payload.taskSetVersion ?? LEGACY_TASK_SET_VERSION, payload.language ?? 'javascript')
       reply(response, 200, result)
     } catch (error) {
-      const code = ['unknown_task', 'invalid_source'].includes(error.message) ? 400 : 422
+      const code = error.code === 'runtime_unavailable' ? 503 : ['unknown_task', 'invalid_source', 'invalid_language'].includes(error.message) ? 400 : 422
       // Deliberately do not log source, inputs, outputs, stack traces, or request headers.
-      reply(response, code, { message: code === 400 ? error.message : 'sandbox_error' })
+      reply(response, code, { message: code === 400 ? error.message : code === 503 ? 'runtime_unavailable' : 'sandbox_error' })
     }
   })
 })

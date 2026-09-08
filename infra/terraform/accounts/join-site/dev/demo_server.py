@@ -1,4 +1,4 @@
-"""Loopback-only demo of the real API, domain rules and QuickJS runner.
+"""Loopback-only demo of the real API, domain rules and language dispatcher.
 
 Everything except the API/domain/runner implementation is disposable in-memory
 demo data. Cloud storage, metadata credentials and email are never constructed.
@@ -26,13 +26,11 @@ ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = "http://127.0.0.1:4173"
 ADMIN_KEY = "demo-admin"
 DEMO_DIRECTIONS = [
-    ("development", "Разработка", "Аня"),
+    ("backend", "Бэкенд", "Аня"),
+    ("frontend", "Фронтенд", "Саша"),
+    ("mobile", "Мобильная разработка", "Оля"),
     ("ai", "AI/ML", "Марк"),
-    ("electronics", "Электроника", "Оля"),
-    ("design", "Дизайн", "Саша"),
-    ("product", "Продукт", "Дима"),
-    ("marketing", "Маркетинг", "Лена"),
-    ("general", None, "Женя"),
+    ("boost", "Системная разработка (EdiumBoost)", "Лена"),
 ]
 
 
@@ -174,19 +172,28 @@ def configure_runner(api):
     slots = threading.BoundedSemaphore(2)
 
     class LocalRunner(api.SandboxRunner):
-        def run(self, task_id, source, task_set_version):
+        @property
+        def supported_languages(self):
+            # Preview invitations can expose both mobile editors before the
+            # local toolchains are installed. Execution still fails explicitly.
+            return {"javascript", "kotlin", "swift"}
+
+        def run(self, task_id, source, task_set_version, language="javascript"):
             if not slots.acquire(blocking=False):
                 raise api.RunnerUnavailable("local_runner_busy")
             try:
                 result = subprocess.run(
                     [node, str(ROOT / "dev" / "run-task.js")],
-                    input=json.dumps({"taskId": task_id, "source": source, "taskSetVersion": task_set_version}),
-                    text=True, capture_output=True, timeout=45, check=True,
+                    input=json.dumps({"taskId": task_id, "source": source, "taskSetVersion": task_set_version, "language": language}),
+                    text=True, capture_output=True, timeout=120, check=True,
                     cwd=ROOT / "runner",
                 )
+                payload = json.loads(result.stdout)
+                if payload == {"error": "runtime_unavailable"}:
+                    raise api.ContestError("runtime_unavailable", "Среда выполнения этого языка пока недоступна локально.", 503)
                 tasks = api.public_tasks(task_set_version)
                 expected_total = next(task["testCount"] for task in tasks if task["id"] == task_id)
-                return self._sanitize(json.loads(result.stdout), expected_total)
+                return self._sanitize(payload, expected_total)
             except (subprocess.SubprocessError, ValueError, StopIteration, KeyError) as error:
                 raise api.RunnerUnavailable("local_runner_unavailable") from error
             finally:
@@ -215,7 +222,7 @@ def make_demo(port=8787):
     configure_runner(api)
     now = datetime.now(timezone.utc)
     links = []
-    rows = [*DEMO_DIRECTIONS, ("new-application", "Разработка", "Костя")]
+    rows = [*DEMO_DIRECTIONS, ("new-application", "Бэкенд", "Костя")]
     for index, (slug, direction, first_name) in enumerate(rows):
         application_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"edium-local-demo:{slug}"))
         repo.applications[application_id] = {
@@ -239,26 +246,26 @@ def make_demo(port=8787):
         if result["statusCode"] != 201:
             raise RuntimeError(f"Unable to seed demo direction: {slug}")
         contest = json.loads(result["body"])["contest"]
-        links.append({"direction": direction or "Пока выбираю направление", "url": contest["inviteUrl"],
+        languages = sorted({language for task in contest["tasks"] for language in task["languages"]})
+        links.append({"direction": direction, "url": contest["inviteUrl"], "languages": languages,
                       "applicationId": application_id, "slug": slug})
     return api, repo, links
 
 
 def demo_index(links):
     captions = {
-        "development": "Релиз близко. Разберись с маленьким хаосом в большом продукте.",
+        "backend": "Пуши, купоны и подписки. Пусть сервер переживёт ещё один понедельник.",
+        "frontend": "Карточки, контраст и длинные кнопки. Сделай интерфейс удобным для людей.",
+        "mobile": "Офлайн-синхронизация, разрешения и загрузки. Kotlin и Swift пригодятся оба.",
         "ai": "Помоги искусственному интеллекту подружиться со здравым смыслом.",
-        "electronics": "Железки тоже умеют капризничать. Договорись с ними через код.",
-        "design": "Наведи порядок в интерфейсной вселенной, где всё немного съехало.",
-        "product": "Пользователей много, времени мало. Помоги продукту выбрать главное.",
-        "marketing": "Цифры, кампании и творческий беспорядок. Пусть всё сойдётся.",
-        "general": "Ещё выбираешь своё дело? Начни с задач из жизни команды.",
+        "boost": "ПО устройства, интерфейсы и интеграции с железом: кнопки, умный дом и экран Boost.",
     }
+    language_labels = {"javascript": "JavaScript", "kotlin": "Kotlin", "swift": "Swift"}
     cards = []
     for index, item in enumerate(links, 1):
         cards.append(
             f'<a class="track" href="{html.escape(item["url"], quote=True)}">'
-            f'<div class="track-meta"><span>{index:02d}</span><span class="language">JS</span></div>'
+            f'<div class="track-meta"><span>{index:02d}</span><span class="language">{html.escape(" + ".join(language_labels[value] for value in item["languages"]))}</span></div>'
             f'<h2>{html.escape(item["direction"])}</h2>'
             f'<p>{html.escape(captions[item["slug"]])}</p>'
             '<span class="track-link">Открыть контест <span aria-hidden="true">↗</span></span></a>'
@@ -310,7 +317,7 @@ def demo_index(links):
   <div class="shell">
     <header><div class="brand"><span class="brand-icon" aria-hidden="true">e</span>edium</div><span class="preview">Локальное демо</span></header>
     <main>
-      <section class="hero" aria-labelledby="page-title"><p class="eyebrow">7 направлений · JavaScript</p><h1 id="page-title">Рабочие будни.<br>Только чуть смешнее.</h1><p>Выбери направление и попробуй себя в команде Edium. Прикладные задачи, немного рабочего абсурда и все тесты сразу.</p></section>
+      <section class="hero" aria-labelledby="page-title"><p class="eyebrow">5 направлений · JavaScript, Kotlin и Swift</p><h1 id="page-title">Рабочие будни.<br>Только чуть смешнее.</h1><p>Выбери направление и попробуй себя в команде Edium. Прикладные задачи, немного рабочего абсурда и все тесты сразу.</p></section>
       <section class="tracks" aria-label="Выбери направление">{"".join(cards)}</section>
       <section class="admin" aria-labelledby="admin-title"><div><h2 id="admin-title">Посмотреть со стороны команды</h2><p>Заявки, приглашения и решения кандидатов. Ключ для входа: <code>{ADMIN_KEY}</code></p></div><a class="admin-button" href="{FRONTEND}/join/admin/">Открыть HR-раздел ↗</a></section>
     </main>

@@ -154,7 +154,7 @@ class HandlerTests(unittest.TestCase):
             "telegram": "@annatest",
             "phone": "+4915123456789",
             "email": "anna@example.test",
-            "direction": "Дизайн",
+            "direction": "Фронтенд",
             "motivation": "Мне интересно проектировать понятные образовательные продукты для людей.",
             "portfolioUrl": "https://example.test/portfolio",
             "startedAt": (datetime.now(timezone.utc) - timedelta(seconds=5)).isoformat(),
@@ -174,6 +174,7 @@ class HandlerTests(unittest.TestCase):
             "lastName": "Тестова",
             "telegram": "@annatest",
             "phone": "+4915123456789",
+            "direction": "Фронтенд",
             "motivation": "Мне интересно проектировать понятные образовательные продукты для людей.",
             "startedAt": (datetime.now(timezone.utc) - timedelta(seconds=5)).isoformat(),
         }
@@ -294,12 +295,137 @@ class HandlerTests(unittest.TestCase):
                 "taskId": task_id, "source": source, "taskSetVersion": "edium-js-2026-09-v2-marketing",
             }))
             self.assertEqual(result["statusCode"], 200)
-            run.assert_called_once_with(task_id, source, contest["taskSetVersion"])
+            run.assert_called_once_with(task_id, source, contest["taskSetVersion"], "javascript")
             rejected = handler.api(self.contest_request("POST", "/v1/contest/run", token, {
                 "taskId": "ai-evidence", "source": source,
             }))
             self.assertEqual(rejected["statusCode"], 404)
             self.assertEqual(run.call_count, 1)
+
+    def issue_mobile_contest(self):
+        handler._repository = FakeAdminContestRepository()
+        handler._repository.application["direction"] = "Мобильная разработка"
+        with patch.dict(os.environ, {"RUNNER_LANGUAGES": "javascript,kotlin,swift"}):
+            issued = handler.api({
+                "httpMethod": "POST", "path": f"/v1/admin/applications/{self.upload['upload_id']}/contest",
+                "headers": {"Authorization": "Bearer test-admin-secret"}, "body": "{}",
+            })
+        self.assertEqual(issued["statusCode"], 201)
+        token = json.loads(issued["body"])["contest"]["inviteUrl"].split("#invite=", 1)[1]
+        started = handler.api(self.contest_request("POST", "/v1/contest/start", token))
+        self.assertEqual(started["statusCode"], 200)
+        return token, json.loads(started["body"])["contest"]
+
+    def test_mobile_invitation_requires_both_native_runtimes_before_persisting_or_queuing_email(self):
+        for configured in (None, "", "javascript", "kotlin", "swift", "javascript,kotlin", "javascript,swift", "python", "KOTLIN,SWIFT"):
+            with self.subTest(configured=configured), patch.dict(os.environ):
+                if configured is None:
+                    os.environ.pop("RUNNER_LANGUAGES", None)
+                else:
+                    os.environ["RUNNER_LANGUAGES"] = configured
+                repo = FakeAdminContestRepository(email="anna@example.test")
+                repo.application["direction"] = "Мобильная разработка"
+                handler._repository = repo
+                with patch.object(repo, "create_contest", wraps=repo.create_contest) as persist, patch.object(handler, "attach_token_hash") as token:
+                    result = handler.api({
+                        "httpMethod": "POST", "path": f"/v1/admin/applications/{self.upload['upload_id']}/contest",
+                        "headers": {"Authorization": "Bearer test-admin-secret"}, "body": "{}",
+                    })
+                    self.assertEqual(result["statusCode"], 503)
+                    self.assertEqual(json.loads(result["body"])["code"], "runtime_unavailable")
+                    self.assertIn("Kotlin и Swift", json.loads(result["body"])["message"])
+                    persist.assert_not_called()
+                    token.assert_not_called()
+                self.assertIsNone(repo.contest)
+                self.assertEqual(repo.version, 0)
+
+    def test_explicit_both_native_capabilities_allow_one_mobile_invitation(self):
+        repo = FakeAdminContestRepository(email="anna@example.test")
+        repo.application["direction"] = "Мобильная разработка"
+        handler._repository = repo
+        with patch.dict(os.environ, {"RUNNER_LANGUAGES": " kotlin, swift "}), patch.object(repo, "create_contest", wraps=repo.create_contest) as persist:
+            result = handler.api({
+                "httpMethod": "POST", "path": f"/v1/admin/applications/{self.upload['upload_id']}/contest",
+                "headers": {"Authorization": "Bearer test-admin-secret"}, "body": "{}",
+            })
+            self.assertEqual(result["statusCode"], 201)
+            persist.assert_called_once()
+        self.assertEqual(repo.contest["invitation_notification_status"], "pending")
+        self.assertEqual(repo.contest["task_set_version"], "edium-mobile-2026-09-v3")
+
+    def test_js_invitation_remains_available_without_runner_url_or_declared_capabilities(self):
+        repo = FakeAdminContestRepository(email=None)
+        repo.application["direction"] = "Бэкенд"
+        handler._repository = repo
+        with patch.dict(os.environ, {"RUNNER_URL": "", "RUNNER_LANGUAGES": ""}):
+            result = handler.api({
+                "httpMethod": "POST", "path": f"/v1/admin/applications/{self.upload['upload_id']}/contest",
+                "headers": {"Authorization": "Bearer test-admin-secret"}, "body": "{}",
+            })
+        self.assertEqual(result["statusCode"], 201)
+        self.assertEqual(repo.contest["task_set_version"], "edium-js-2026-09-v3-backend")
+
+    def test_mobile_api_rejects_forbidden_languages_before_calling_runner_or_saving(self):
+        token, contest = self.issue_mobile_contest()
+        self.assertEqual(contest["languages"], ["kotlin", "swift"])
+        self.assertEqual(contest["language"], "mixed")
+        with patch.object(handler.SandboxRunner, "run") as run:
+            for index, task in enumerate(contest["tasks"]):
+                invalid_languages = ["javascript", "python", "", {}, ["kotlin"]]
+                if index < 2:
+                    invalid_languages.append("swift" if index == 0 else "kotlin")
+                for language in invalid_languages:
+                    for method, path in [("POST", "/v1/contest/run"), ("PATCH", f"/v1/contest/answers/{task['id']}")]:
+                        with self.subTest(task=task["id"], language=language, method=method):
+                            result = handler.api(self.contest_request(method, path, token, {
+                                "taskId": task["id"], "source": "code", "language": language, "revision": contest["revision"],
+                            }))
+                            self.assertEqual(result["statusCode"], 400)
+                            self.assertEqual(json.loads(result["body"])["code"], "invalid_language")
+            run.assert_not_called()
+        self.assertEqual(handler._repository.contest["answers"], {})
+        self.assertEqual(handler._repository.contest["revision"], contest["revision"])
+
+    def test_mobile_api_dispatches_each_language_and_persists_it_for_hr(self):
+        token, contest = self.issue_mobile_contest()
+        tasks, version = contest["tasks"], contest["taskSetVersion"]
+        for task in tasks:
+            for language, option in task["languages"].items():
+                with patch.object(handler.SandboxRunner, "run", return_value={"passed": 0, "total": task["testCount"], "tests": []}) as run:
+                    result = handler.api(self.contest_request("POST", "/v1/contest/run", token, {
+                        "taskId": task["id"], "source": option["starterCode"], "language": language,
+                    }))
+                    self.assertEqual(result["statusCode"], 200)
+                    run.assert_called_once_with(task["id"], option["starterCode"], version, language)
+                saved = handler.api(self.contest_request("PATCH", f"/v1/contest/answers/{task['id']}", token, {
+                    "source": option["starterCode"], "language": language, "revision": contest["revision"],
+                }))
+                self.assertEqual(saved["statusCode"], 200)
+                contest = json.loads(saved["body"])["contest"]
+                self.assertEqual(contest["answers"][task["id"]]["language"], language)
+        submitted = handler.api(self.contest_request("POST", "/v1/contest/submit", token))
+        self.assertEqual(submitted["statusCode"], 200)
+        self.assertEqual({answer["language"] for answer in handler._repository.contest["answers"].values()}, {"kotlin", "swift"})
+
+    def test_mobile_api_omitted_language_uses_task_default_and_submit_requires_both_mandatory_tasks(self):
+        token, contest = self.issue_mobile_contest()
+        tasks, version = contest["tasks"], contest["taskSetVersion"]
+        for task in tasks:
+            with patch.object(handler.SandboxRunner, "run", return_value={"passed": 0, "total": task["testCount"], "tests": []}) as run:
+                result = handler.api(self.contest_request("POST", "/v1/contest/run", token, {
+                    "taskId": task["id"], "source": task["starterCode"],
+                }))
+                self.assertEqual(result["statusCode"], 200)
+                run.assert_called_once_with(task["id"], task["starterCode"], version, task["defaultLanguage"])
+        first = tasks[0]
+        saved = handler.api(self.contest_request("PATCH", f"/v1/contest/answers/{first['id']}", token, {
+            "source": first["starterCode"], "revision": contest["revision"],
+        }))
+        self.assertEqual(saved["statusCode"], 200)
+        self.assertEqual(json.loads(saved["body"])["contest"]["answers"][first["id"]]["language"], "kotlin")
+        submitted = handler.api(self.contest_request("POST", "/v1/contest/submit", token))
+        self.assertEqual(submitted["statusCode"], 409)
+        self.assertEqual(json.loads(submitted["body"])["code"], "incomplete")
 
 
 if __name__ == "__main__":

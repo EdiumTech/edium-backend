@@ -10,6 +10,7 @@ sys.path.insert(0, str(APP_DIR))
 
 from contest import (  # noqa: E402
     ContestError,
+    answer_language,
     assigned_task_set,
     attach_token_hash,
     candidate_view,
@@ -24,7 +25,7 @@ from contest import (  # noqa: E402
     token_matches,
     update_review,
 )
-from contest_content import LEGACY_TASK_SET_VERSION, resolve_task_set, task_ids  # noqa: E402
+from contest_content import LEGACY_TASK_SET_VERSION, public_tasks, resolve_task_set, task_ids  # noqa: E402
 
 
 class ContestTests(unittest.TestCase):
@@ -97,7 +98,7 @@ class ContestTests(unittest.TestCase):
         task_id = next(iter(task_ids()))
         start_contest(self.contest, self.now)
         self.assertTrue(save_answer(self.contest, task_id, {"source": "function solve(){}"}, self.contest["revision"], self.now))
-        self.assertEqual(set(self.contest["answers"][task_id]), {"source", "updated_at"})
+        self.assertEqual(set(self.contest["answers"][task_id]), {"source", "language", "updated_at"})
         with self.assertRaisesRegex(ContestError, "Добавь решение"):
             submit_contest(self.contest, self.now)
 
@@ -132,6 +133,69 @@ class ContestTests(unittest.TestCase):
         start_contest(self.contest, self.now)
         with self.assertRaisesRegex(ContestError, "64 КБ"):
             save_answer(self.contest, next(iter(task_ids())), {"source": "ё" * 33000}, self.contest["revision"], self.now)
+
+    def mobile_contest(self):
+        contest, _ = new_contest("mobile-app", 90, self.now + timedelta(days=1), self.now, direction="Мобильная разработка")
+        start_contest(contest, self.now)
+        return contest, public_tasks(assigned_task_set(contest))
+
+    def test_mobile_metadata_and_omitted_language_use_each_task_default(self):
+        contest, tasks = self.mobile_contest()
+        self.assertEqual(candidate_view(contest)["language"], "mixed")
+        self.assertEqual(candidate_view(contest)["languages"], ["kotlin", "swift"])
+        for task, expected in zip(tasks, ["kotlin", "swift", "kotlin"]):
+            self.assertEqual(answer_language(contest, task["id"]), expected)
+            save_answer(contest, task["id"], {"source": task["starterCode"]}, contest["revision"], self.now)
+            self.assertEqual(contest["answers"][task["id"]]["language"], expected)
+
+    def test_mobile_wrong_languages_fail_before_saving_and_cannot_expand_allowed_options(self):
+        contest, tasks = self.mobile_contest()
+        for task in tasks:
+            for language in ("javascript", "python", "Kotlin", "", {}, ["kotlin"]):
+                with self.subTest(task=task["id"], language=language):
+                    revision = contest["revision"]
+                    with self.assertRaises(ContestError) as error:
+                        save_answer(contest, task["id"], {"source": "code", "language": language}, revision, self.now)
+                    self.assertEqual(error.exception.code, "invalid_language")
+                    self.assertEqual(contest["revision"], revision)
+                    self.assertNotIn(task["id"], contest["answers"])
+        for task, language in [(tasks[0], "swift"), (tasks[1], "kotlin")]:
+            with self.assertRaises(ContestError) as error:
+                answer_language(contest, task["id"], language)
+            self.assertEqual(error.exception.code, "invalid_language")
+
+    def test_mobile_language_change_is_a_revision_even_when_source_is_unchanged(self):
+        contest, tasks = self.mobile_contest()
+        task_id = tasks[2]["id"]
+        save_answer(contest, task_id, {"source": "same source", "language": "kotlin"}, contest["revision"], self.now)
+        revision = contest["revision"]
+        self.assertTrue(save_answer(contest, task_id, {"source": "same source", "language": "swift"}, revision, self.now))
+        self.assertEqual(contest["revision"], revision + 1)
+        self.assertEqual(contest["answers"][task_id]["language"], "swift")
+        self.assertFalse(save_answer(contest, task_id, {"source": "same source", "language": "swift"}, contest["revision"], self.now))
+
+    def test_mobile_submission_requires_swift_task_and_revalidates_stored_languages(self):
+        contest, tasks = self.mobile_contest()
+        for task in (tasks[0], tasks[2]):
+            save_answer(contest, task["id"], {"source": task["starterCode"], "language": "kotlin"}, contest["revision"], self.now)
+        with self.assertRaises(ContestError) as error:
+            submit_contest(contest, self.now)
+        self.assertEqual(error.exception.code, "incomplete")
+        contest["answers"][tasks[1]["id"]] = {"source": "code", "language": "kotlin"}
+        with self.assertRaises(ContestError) as error:
+            submit_contest(contest, self.now)
+        self.assertEqual(error.exception.code, "invalid_language")
+        save_answer(contest, tasks[1]["id"], {"source": tasks[1]["starterCode"], "language": "swift"}, contest["revision"], self.now)
+        self.assertTrue(submit_contest(contest, self.now))
+
+    def test_js_assignment_cannot_switch_to_mobile_languages(self):
+        start_contest(self.contest, self.now)
+        task_id = next(iter(task_ids()))
+        self.assertEqual(answer_language(self.contest, task_id), "javascript")
+        for language in ("kotlin", "swift"):
+            with self.assertRaises(ContestError) as error:
+                save_answer(self.contest, task_id, {"source": "code", "language": language}, self.contest["revision"], self.now)
+            self.assertEqual(error.exception.code, "invalid_language")
 
 
 if __name__ == "__main__":

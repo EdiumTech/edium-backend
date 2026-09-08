@@ -6,6 +6,7 @@
 !runner/sandbox.js
 !runner/server.js
 !runner/tasks.js
+!runner/dispatcher.js
 !functions/
 !functions/app/
 !functions/app/contest_catalog.json

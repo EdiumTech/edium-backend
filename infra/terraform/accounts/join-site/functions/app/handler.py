@@ -12,6 +12,7 @@ from botocore.exceptions import ClientError
 from contest import (
     CONTEST_STATES,
     ContestError,
+    answer_language,
     assigned_task_set,
     attach_token_hash,
     candidate_view,
@@ -273,8 +274,9 @@ def run_candidate_tests(event: dict) -> dict:
     if not isinstance(task_id, str) or task_id not in task_ids(version):
         raise ContestError("unknown_task", "Задача не найдена.", 404)
     validate_source(source)
+    language = answer_language(contest, task_id, payload.get("language"))
     try:
-        result = SandboxRunner().run(task_id, source, version)
+        result = SandboxRunner().run(task_id, source, version, language)
     except RunnerUnavailable as error:
         raise ContestError("runner_unavailable", "Песочница временно недоступна. Код сохранён; попробуй позже.", 503) from error
     return response(200, {"result": result}, event)
@@ -436,6 +438,13 @@ def admin_contest_route(event: dict, method: str, application: dict, action: str
             application["application_id"], duration, now + timedelta(days=start_within_days), now,
             direction=application.get("direction"),
         )
+        required_native_languages = set(candidate_view(contest)["languages"]) - {"javascript"}
+        if required_native_languages and not required_native_languages.issubset(SandboxRunner().supported_languages):
+            raise ContestError(
+                "runtime_unavailable",
+                "Мобильный контест пока недоступен: сначала настройте изолированный запуск Kotlin и Swift.",
+                503,
+            )
         attach_token_hash(contest, os.environ["CONTEST_TOKEN_KEY"])
         if not application.get("email"):
             contest["invitation_notification_status"] = "not_requested"

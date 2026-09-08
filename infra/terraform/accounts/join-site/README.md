@@ -30,11 +30,19 @@ The browser never supplies a trusted state, `startedAt`, deadline, or completion
 
 ## Candidate tasks and execution
 
-New invitations select a task set from the application direction: development, AI/ML, electronics, design, product, marketing, or a general product-work fallback. Both the direction and immutable `task_set_version` are stored at invitation time. Changing the application later does not swap the candidate's tasks. Existing v1 invitations keep their original statements and tests.
+New applications require one of five directions: Бэкенд, Фронтенд, Мобильная разработка, AI/ML, or Системная разработка (EdiumBoost). Each direction has three practical, lightly humorous tasks. Boost tasks concern device buttons, smart-home command queues and stale screen state; they do not claim that EdiumBoost has its own OS or a published native SDK. Both the direction and immutable `task_set_version` are stored at invitation time. Changing the application later does not swap the candidate's tasks. All existing v1/v2 invitations retain their original statements, languages and tests; old applications with retired directions still resolve to their corresponding legacy sets.
 
-Answers contain JavaScript source for `solve(input)` only. Explanations, solution links and solution attachments are not required; submission checks for code in every assigned task. The sandbox executes JavaScript directly, so TypeScript syntax is reported as a syntax error.
+Answers contain source code and its allowed language only. Explanations, solution links and solution attachments are not required; submission checks for code in every assigned task. Backend, frontend, AI/ML and Boost use JavaScript (`solve(input)`, not TypeScript). Mobile requires **both** Kotlin and Swift: the outbox task accepts only Kotlin, the permission task only Swift, and the download task accepts either. The server validates language on save, test and submit. Each public task contains language-specific signatures and starter code. Changing the optional task language preserves both drafts in the current tab; only the selected answer is saved on the server.
 
 `functions/app/contest_catalog.json` is the shared source for statements, examples and complete test suites. Candidate task metadata includes `testCount`. A run executes every test in the assigned suite, including cases not shown as statement examples. Each test gets its own fresh runtime; one exception or timeout does not skip subsequent tests. The response is `{ passed: number, total: number, allPassed: boolean, tests, durationMs }`. The control plane verifies the number of returned cases and derives the counts from their boolean results rather than trusting a summary. The client cannot select another direction, version or task id outside its assignment.
+
+### Mobile runtime: local preview, not yet a Linux deployment
+
+The macOS development adapters use real compilers, not translation heuristics or source matching. Kotlin 2.2.21 compiles to standalone JavaScript, which executes only in QuickJS/Wasm. Swift 6.3.1 compiles with the official WASI SDK and runs in Wasmtime. Compiler subprocesses use deny-default macOS Seatbelt profiles, fixed options, an empty credential environment and isolated temporary job directories; candidate code never runs natively on the host. Missing toolchains or unavailable isolation return `runtime_unavailable`. Compile errors report 0/N with the compiler diagnostic; successful compilation runs the complete suite.
+
+**Deployment gate:** the current `runner/Dockerfile` remains the existing JS-only image. It includes the language dispatcher and explicitly returns 503 for mobile code, never runs a compiler without isolation. New mobile invitations are blocked unless `RUNNER_LANGUAGES` explicitly advertises both `kotlin,swift`. Do not set that in production with this image. A production mobile release still needs a separately verified Linux compiler sandbox, pinned toolchains, memory/time limits measured on the actual serverless runtime, and a reviewed isolated Terraform plan. The current 512 MB / 10-second container and 30-second function settings are for JavaScript only. No cloud resource changes or production apply are included in the mobile preview.
+
+See [local preview instructions](dev/README.md), [Kotlin toolchain setup](dev/KOTLIN-TOOLCHAIN.md), and [Swift toolchain setup](dev/SWIFT-TOOLCHAIN.md). Reference solutions and native proof programs are test/development-only and excluded from the production image.
 
 ## Secrets and configuration
 
@@ -85,7 +93,7 @@ cd runner && npm ci --ignore-scripts && npm test
 
 Run the `Build Join Contest Runner` workflow. It tests the sandbox, pushes an immutable image and prints a digest-pinned URL. Put that exact URL in the production Environment variable `JOIN_RUNNER_IMAGE_URL`; the deployment workflow passes it to Terraform. An empty value deliberately leaves code execution disabled while the rest of the API can be reviewed.
 
-The Docker build context is this `join-site` directory, with `--file runner/Dockerfile`, so the image and API bundle consume the same catalog. Release in this order: matching runner image, API with the new assignments, then frontend. The updated frontend can derive counts from legacy per-test reports during a rolling release.
+The Docker build context is this `join-site` directory, with `--file runner/Dockerfile`, so the image and API bundle consume the same catalog. Release in this order: matching runner image, API with the new assignments, then frontend. Keep mobile invitations gated until the native-runtime requirements above are verified; publishing the JS-only image does not enable Kotlin/Swift. The updated frontend can derive counts from legacy per-test reports during a rolling release.
 
 ## Test deployment
 
@@ -146,6 +154,7 @@ email.
 - double/concurrent start and submit; stale two-tab autosave conflict;
 - deadline while editing or running tests; one allowed extension;
 - empty, long-running, memory-heavy and malicious JavaScript;
+- mandatory Kotlin/Swift task language enforcement, syntax errors, full suite results, sandbox denial checks and missing-toolchain failures;
 - direction-specific invitations, pinned legacy assignments, source-only submission, complete and partial test counts;
 - runner unavailable and Herald unavailable without losing saved answers;
 - HR answer review, notes, 1–5 scores and conclusion; no auto hiring score;

@@ -18,11 +18,16 @@ class SandboxRunner:
     def enabled(self) -> bool:
         return bool(self.url)
 
-    def run(self, task_id: str, source: str, task_set_version: str) -> dict:
+    @property
+    def supported_languages(self) -> set[str]:
+        configured = os.getenv("RUNNER_LANGUAGES", "javascript").split(",")
+        return {value.strip() for value in configured if value.strip() in {"javascript", "kotlin", "swift"}}
+
+    def run(self, task_id: str, source: str, task_set_version: str, language: str = "javascript") -> dict:
         if not self.enabled:
             raise RunnerUnavailable("runner_disabled")
         token = self._iam_token()
-        data = json.dumps({"taskId": task_id, "source": source, "taskSetVersion": task_set_version}, ensure_ascii=False).encode("utf-8")
+        data = json.dumps({"taskId": task_id, "source": source, "taskSetVersion": task_set_version, "language": language}, ensure_ascii=False).encode("utf-8")
         request = urllib.request.Request(
             self.url,
             data=data,
@@ -34,7 +39,7 @@ class SandboxRunner:
             },
         )
         try:
-            with urllib.request.urlopen(request, timeout=9) as response:
+            with urllib.request.urlopen(request, timeout=9 if language == "javascript" else 119) as response:
                 if response.status != 200:
                     raise RunnerUnavailable("runner_http_error")
                 result = json.loads(response.read(262144).decode("utf-8"))
@@ -75,7 +80,9 @@ class SandboxRunner:
                 }
             )
         duration = result.get("durationMs", 0)
-        if not isinstance(duration, (int, float)) or not 0 <= duration <= 10000:
+        # Includes mobile compilation in local/native-capable runners, not only
+        # the much shorter per-case sandbox execution time.
+        if isinstance(duration, bool) or not isinstance(duration, (int, float)) or not 0 <= duration <= 120000:
             raise RunnerUnavailable("invalid_runner_response")
         passed = sum(item["passed"] for item in tests)
         return {

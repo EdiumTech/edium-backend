@@ -1,6 +1,3391 @@
 {
   "schemaVersion": 1,
   "sets": {
+    "edium-mobile-2026-09-v3": {
+      "direction": "Мобильная разработка",
+      "languages": [
+        "kotlin",
+        "swift"
+      ],
+      "tasks": [
+        {
+          "id": "mobile-outbox-cat",
+          "title": "Офлайн-кот отправил заметку дважды",
+          "summary": "Собери локальное состояние после синхронизации: повторы, старые версии и удаления не должны оживлять забытые заметки.",
+          "description": "Реализуй solve(input) на Kotlin. operations идут в порядке доставки и содержат уникальный для операции id (повторы возможны), entityId, неотрицательную целую revision, kind из put/delete и JSON-значение value. Сначала оставь первое вхождение каждого id; последующие id добавь в duplicateIds в порядке обработки. Для каждого entityId выбери операцию с наибольшей revision; при равенстве — более позднюю среди оставшихся. Если победил put, добавь {id:entityId,value,revision} в items. Если delete — добавь entityId в deletedIds; значение value у удаления не используется. items и deletedIds отсортируй по entityId в лексикографическом порядке (имена состоят из латиницы, цифр и дефиса). Верни {items,deletedIds,duplicateIds}. Пустые списки допустимы, value может быть null. Вся работа — с переданными данными, без Android API. Входные массивы содержат не более 1000 элементов. Все целые числа и промежуточные суммы или разности укладываются в диапазон от -2147483648 до 2147483647; ограничения неотрицательных полей сохраняются. В Kotlin числовые значения из JSON имеют тип Number: используй toInt() или toDouble().",
+          "defaultLanguage": "kotlin",
+          "languages": {
+            "kotlin": {
+              "label": "Kotlin",
+              "signature": "fun solve(input: Map<String, Any?>): Map<String, Any?>",
+              "starterCode": "fun solve(input: Map<String, Any?>): Map<String, Any?> {\n    return mapOf(\"items\" to emptyList<Any>(), \"deletedIds\" to emptyList<String>(), \"duplicateIds\" to emptyList<String>())\n}\n"
+            }
+          },
+          "publicExampleCount": 2,
+          "tests": [
+            {
+              "name": "повтор операции не меняет заметку",
+              "input": {
+                "operations": [
+                  {
+                    "id": "a",
+                    "entityId": "note",
+                    "revision": 1,
+                    "kind": "put",
+                    "value": "Купить чай"
+                  },
+                  {
+                    "id": "a",
+                    "entityId": "note",
+                    "revision": 9,
+                    "kind": "put",
+                    "value": "Купить завод"
+                  }
+                ]
+              },
+              "expected": {
+                "items": [
+                  {
+                    "id": "note",
+                    "value": "Купить чай",
+                    "revision": 1
+                  }
+                ],
+                "deletedIds": [],
+                "duplicateIds": [
+                  "a"
+                ]
+              }
+            },
+            {
+              "name": "удаление побеждает старое сохранение",
+              "input": {
+                "operations": [
+                  {
+                    "id": "new",
+                    "entityId": "note",
+                    "revision": 3,
+                    "kind": "delete",
+                    "value": null
+                  },
+                  {
+                    "id": "old",
+                    "entityId": "note",
+                    "revision": 2,
+                    "kind": "put",
+                    "value": "Привет"
+                  }
+                ]
+              },
+              "expected": {
+                "items": [],
+                "deletedIds": [
+                  "note"
+                ],
+                "duplicateIds": []
+              }
+            },
+            {
+              "name": "при равной версии побеждает последняя операция",
+              "input": {
+                "operations": [
+                  {
+                    "id": "a",
+                    "entityId": "note",
+                    "revision": 2,
+                    "kind": "delete",
+                    "value": null
+                  },
+                  {
+                    "id": "b",
+                    "entityId": "note",
+                    "revision": 2,
+                    "kind": "put",
+                    "value": "Вернулся"
+                  }
+                ]
+              },
+              "expected": {
+                "items": [
+                  {
+                    "id": "note",
+                    "value": "Вернулся",
+                    "revision": 2
+                  }
+                ],
+                "deletedIds": [],
+                "duplicateIds": []
+              }
+            },
+            {
+              "name": "состояние разных заметок сортируется по id",
+              "input": {
+                "operations": [
+                  {
+                    "id": "1",
+                    "entityId": "z",
+                    "revision": 0,
+                    "kind": "put",
+                    "value": 0
+                  },
+                  {
+                    "id": "2",
+                    "entityId": "b",
+                    "revision": 1,
+                    "kind": "delete",
+                    "value": "ignored"
+                  },
+                  {
+                    "id": "3",
+                    "entityId": "a",
+                    "revision": 1,
+                    "kind": "put",
+                    "value": {
+                      "done": false
+                    }
+                  },
+                  {
+                    "id": "4",
+                    "entityId": "A",
+                    "revision": 1,
+                    "kind": "delete",
+                    "value": null
+                  }
+                ]
+              },
+              "expected": {
+                "items": [
+                  {
+                    "id": "a",
+                    "value": {
+                      "done": false
+                    },
+                    "revision": 1
+                  },
+                  {
+                    "id": "z",
+                    "value": 0,
+                    "revision": 0
+                  }
+                ],
+                "deletedIds": [
+                  "A",
+                  "b"
+                ],
+                "duplicateIds": []
+              }
+            },
+            {
+              "name": "id операции удаляет повторы глобально",
+              "input": {
+                "operations": [
+                  {
+                    "id": "same",
+                    "entityId": "a",
+                    "revision": 1,
+                    "kind": "put",
+                    "value": null
+                  },
+                  {
+                    "id": "same",
+                    "entityId": "b",
+                    "revision": 9,
+                    "kind": "put",
+                    "value": 2
+                  },
+                  {
+                    "id": "other",
+                    "entityId": "a",
+                    "revision": 0,
+                    "kind": "delete",
+                    "value": null
+                  },
+                  {
+                    "id": "same",
+                    "entityId": "a",
+                    "revision": 9,
+                    "kind": "delete",
+                    "value": null
+                  }
+                ]
+              },
+              "expected": {
+                "items": [
+                  {
+                    "id": "a",
+                    "value": null,
+                    "revision": 1
+                  }
+                ],
+                "deletedIds": [],
+                "duplicateIds": [
+                  "same",
+                  "same"
+                ]
+              }
+            },
+            {
+              "name": "новая запись возвращает ранее удалённую заметку",
+              "input": {
+                "operations": [
+                  {
+                    "id": "a",
+                    "entityId": "note",
+                    "revision": 4,
+                    "kind": "delete",
+                    "value": null
+                  },
+                  {
+                    "id": "b",
+                    "entityId": "note",
+                    "revision": 5,
+                    "kind": "put",
+                    "value": [
+                      "чай",
+                      "кот"
+                    ]
+                  }
+                ]
+              },
+              "expected": {
+                "items": [
+                  {
+                    "id": "note",
+                    "value": [
+                      "чай",
+                      "кот"
+                    ],
+                    "revision": 5
+                  }
+                ],
+                "deletedIds": [],
+                "duplicateIds": []
+              }
+            },
+            {
+              "name": "без операций состояние пусто",
+              "input": {
+                "operations": []
+              },
+              "expected": {
+                "items": [],
+                "deletedIds": [],
+                "duplicateIds": []
+              }
+            }
+          ]
+        },
+        {
+          "id": "mobile-permission-panda",
+          "title": "Панда просит доступ к камере. И ещё раз. И ещё",
+          "summary": "Определи следующий шаг для разрешений: не спамь диалогами и не отправляй фоновые запросы поверх чужого приложения.",
+          "description": "Реализуй solve(input) на Swift. foreground — boolean, grants — объект permission → granted/denied/blocked/unknown. Отсутствующее разрешение считается unknown. requests идут в исходном порядке и содержат уникальный id, permission и boolean explained. Только первый запрос каждого permission обрабатывается; id всех повторных запросов добавь в ignoredIds. Для первого запроса применяй правила строго по порядку: granted → readyIds; blocked → settingsIds; иначе foreground=false → deferredIds; иначе denied и explained=false → rationaleIds; иначе → promptIds. Добавляй id запроса, а не имя permission. Верни {readyIds,settingsIds,deferredIds,rationaleIds,promptIds,ignoredIds}; порядок каждого списка — порядок запросов. Пустые объекты и списки допустимы. Это учебная логика экрана перед системным запросом, UIKit и реальные разрешения устройства не нужны. Входные массивы содержат не более 1000 элементов. Все целые числа и промежуточные суммы или разности укладываются в диапазон от -2147483648 до 2147483647; ограничения неотрицательных полей сохраняются.",
+          "defaultLanguage": "swift",
+          "languages": {
+            "swift": {
+              "label": "Swift",
+              "signature": "func solve(_ input: [String: Any]) -> [String: Any]",
+              "starterCode": "func solve(_ input: [String: Any]) -> [String: Any] {\n    return [\"readyIds\": [String](), \"settingsIds\": [String](), \"deferredIds\": [String](), \"rationaleIds\": [String](), \"promptIds\": [String](), \"ignoredIds\": [String]()]\n}\n"
+            }
+          },
+          "publicExampleCount": 2,
+          "tests": [
+            {
+              "name": "разрешённое готово а неизвестное требует диалога",
+              "input": {
+                "foreground": true,
+                "grants": {
+                  "camera": "granted"
+                },
+                "requests": [
+                  {
+                    "id": "a",
+                    "permission": "camera",
+                    "explained": false
+                  },
+                  {
+                    "id": "b",
+                    "permission": "mic",
+                    "explained": false
+                  }
+                ]
+              },
+              "expected": {
+                "readyIds": [
+                  "a"
+                ],
+                "settingsIds": [],
+                "deferredIds": [],
+                "rationaleIds": [],
+                "promptIds": [
+                  "b"
+                ],
+                "ignoredIds": []
+              }
+            },
+            {
+              "name": "повтор запроса не вызывает новый диалог",
+              "input": {
+                "foreground": true,
+                "grants": {
+                  "camera": "denied"
+                },
+                "requests": [
+                  {
+                    "id": "a",
+                    "permission": "camera",
+                    "explained": false
+                  },
+                  {
+                    "id": "b",
+                    "permission": "camera",
+                    "explained": true
+                  }
+                ]
+              },
+              "expected": {
+                "readyIds": [],
+                "settingsIds": [],
+                "deferredIds": [],
+                "rationaleIds": [
+                  "a"
+                ],
+                "promptIds": [],
+                "ignoredIds": [
+                  "b"
+                ]
+              }
+            },
+            {
+              "name": "в фоне доступные и заблокированные не попадают в отсрочку",
+              "input": {
+                "foreground": false,
+                "grants": {
+                  "camera": "granted",
+                  "mic": "blocked",
+                  "photos": "denied"
+                },
+                "requests": [
+                  {
+                    "id": "a",
+                    "permission": "camera",
+                    "explained": false
+                  },
+                  {
+                    "id": "b",
+                    "permission": "mic",
+                    "explained": false
+                  },
+                  {
+                    "id": "c",
+                    "permission": "photos",
+                    "explained": false
+                  },
+                  {
+                    "id": "d",
+                    "permission": "location",
+                    "explained": true
+                  }
+                ]
+              },
+              "expected": {
+                "readyIds": [
+                  "a"
+                ],
+                "settingsIds": [
+                  "b"
+                ],
+                "deferredIds": [
+                  "c",
+                  "d"
+                ],
+                "rationaleIds": [],
+                "promptIds": [],
+                "ignoredIds": []
+              }
+            },
+            {
+              "name": "объяснённый отказ можно запросить снова",
+              "input": {
+                "foreground": true,
+                "grants": {
+                  "camera": "denied",
+                  "mic": "denied",
+                  "photos": "blocked"
+                },
+                "requests": [
+                  {
+                    "id": "a",
+                    "permission": "camera",
+                    "explained": true
+                  },
+                  {
+                    "id": "b",
+                    "permission": "mic",
+                    "explained": false
+                  },
+                  {
+                    "id": "c",
+                    "permission": "photos",
+                    "explained": true
+                  }
+                ]
+              },
+              "expected": {
+                "readyIds": [],
+                "settingsIds": [
+                  "c"
+                ],
+                "deferredIds": [],
+                "rationaleIds": [
+                  "b"
+                ],
+                "promptIds": [
+                  "a"
+                ],
+                "ignoredIds": []
+              }
+            },
+            {
+              "name": "unknown не требует предварительного объяснения",
+              "input": {
+                "foreground": true,
+                "grants": {
+                  "camera": "unknown"
+                },
+                "requests": [
+                  {
+                    "id": "a",
+                    "permission": "camera",
+                    "explained": false
+                  },
+                  {
+                    "id": "b",
+                    "permission": "mic",
+                    "explained": true
+                  }
+                ]
+              },
+              "expected": {
+                "readyIds": [],
+                "settingsIds": [],
+                "deferredIds": [],
+                "rationaleIds": [],
+                "promptIds": [
+                  "a",
+                  "b"
+                ],
+                "ignoredIds": []
+              }
+            },
+            {
+              "name": "сохраняет порядок нескольких групп и повторов",
+              "input": {
+                "foreground": true,
+                "grants": {
+                  "b": "granted",
+                  "a": "granted"
+                },
+                "requests": [
+                  {
+                    "id": "b1",
+                    "permission": "b",
+                    "explained": false
+                  },
+                  {
+                    "id": "a1",
+                    "permission": "a",
+                    "explained": false
+                  },
+                  {
+                    "id": "b2",
+                    "permission": "b",
+                    "explained": false
+                  },
+                  {
+                    "id": "a2",
+                    "permission": "a",
+                    "explained": false
+                  },
+                  {
+                    "id": "b3",
+                    "permission": "b",
+                    "explained": false
+                  }
+                ]
+              },
+              "expected": {
+                "readyIds": [
+                  "b1",
+                  "a1"
+                ],
+                "settingsIds": [],
+                "deferredIds": [],
+                "rationaleIds": [],
+                "promptIds": [],
+                "ignoredIds": [
+                  "b2",
+                  "a2",
+                  "b3"
+                ]
+              }
+            },
+            {
+              "name": "пустой экран ничего не просит",
+              "input": {
+                "foreground": true,
+                "grants": {},
+                "requests": []
+              },
+              "expected": {
+                "readyIds": [],
+                "settingsIds": [],
+                "deferredIds": [],
+                "rationaleIds": [],
+                "promptIds": [],
+                "ignoredIds": []
+              }
+            }
+          ]
+        },
+        {
+          "id": "mobile-download-lunch",
+          "title": "Скачать весь интернет до обеда",
+          "summary": "Выбери офлайн-загрузки по приоритету с учётом сети, батареи и свободного места.",
+          "description": "Реализуй solve(input) на Kotlin или Swift. onWifi — boolean, batteryPercent и minBatteryPercent — целые от 0 до 100, storageBytes — неотрицательное целое. jobs имеют уникальный id, неотрицательное целое bytes, целый priority, boolean allowCellular и essential. Рассматривай jobs по убыванию priority, при равенстве — в исходном порядке. Правила отказа проверяй в этом порядке: если !onWifi и !allowCellular, причина wifi; иначе если batteryPercent<minBatteryPercent и !essential, причина battery; иначе если bytes больше оставшегося места, причина storage. essential обходит только ограничение батареи. Отказ добавляет {id,reason} в skipped; продолжай проверять следующие задания. Подходящую загрузку добавь в selectedIds и вычти bytes из оставшегося места. Верни {selectedIds,skipped,remainingBytes}. Списки — в порядке рассмотрения. Нулевой размер допустим, все вычисления укладываются в безопасные целые. Реально скачивать ничего не нужно. Входные массивы содержат не более 1000 элементов. Все целые числа и промежуточные суммы или разности укладываются в диапазон от -2147483648 до 2147483647; ограничения неотрицательных полей сохраняются. В Kotlin числовые значения из JSON имеют тип Number: используй toInt() или toDouble().",
+          "defaultLanguage": "kotlin",
+          "languages": {
+            "kotlin": {
+              "label": "Kotlin",
+              "signature": "fun solve(input: Map<String, Any?>): Map<String, Any?>",
+              "starterCode": "fun solve(input: Map<String, Any?>): Map<String, Any?> {\n    return mapOf(\"selectedIds\" to emptyList<String>(), \"skipped\" to emptyList<Any>(), \"remainingBytes\" to input[\"storageBytes\"])\n}\n"
+            },
+            "swift": {
+              "label": "Swift",
+              "signature": "func solve(_ input: [String: Any]) -> [String: Any]",
+              "starterCode": "func solve(_ input: [String: Any]) -> [String: Any] {\n    return [\"selectedIds\": [String](), \"skipped\": [[String: Any]](), \"remainingBytes\": input[\"storageBytes\"] ?? 0]\n}\n"
+            }
+          },
+          "publicExampleCount": 2,
+          "tests": [
+            {
+              "name": "приоритет определяет кто займёт место",
+              "input": {
+                "onWifi": true,
+                "batteryPercent": 80,
+                "minBatteryPercent": 20,
+                "storageBytes": 10,
+                "jobs": [
+                  {
+                    "id": "low",
+                    "bytes": 5,
+                    "priority": 1,
+                    "allowCellular": false,
+                    "essential": false
+                  },
+                  {
+                    "id": "high",
+                    "bytes": 7,
+                    "priority": 2,
+                    "allowCellular": false,
+                    "essential": false
+                  }
+                ]
+              },
+              "expected": {
+                "selectedIds": [
+                  "high"
+                ],
+                "skipped": [
+                  {
+                    "id": "low",
+                    "reason": "storage"
+                  }
+                ],
+                "remainingBytes": 3
+              }
+            },
+            {
+              "name": "отказ от большой загрузки не блокирует маленькую",
+              "input": {
+                "onWifi": true,
+                "batteryPercent": 80,
+                "minBatteryPercent": 20,
+                "storageBytes": 5,
+                "jobs": [
+                  {
+                    "id": "big",
+                    "bytes": 6,
+                    "priority": 3,
+                    "allowCellular": false,
+                    "essential": false
+                  },
+                  {
+                    "id": "small",
+                    "bytes": 5,
+                    "priority": 2,
+                    "allowCellular": false,
+                    "essential": false
+                  }
+                ]
+              },
+              "expected": {
+                "selectedIds": [
+                  "small"
+                ],
+                "skipped": [
+                  {
+                    "id": "big",
+                    "reason": "storage"
+                  }
+                ],
+                "remainingBytes": 0
+              }
+            },
+            {
+              "name": "сеть проверяется раньше батареи и места",
+              "input": {
+                "onWifi": false,
+                "batteryPercent": 5,
+                "minBatteryPercent": 20,
+                "storageBytes": 0,
+                "jobs": [
+                  {
+                    "id": "wifi",
+                    "bytes": 9,
+                    "priority": 3,
+                    "allowCellular": false,
+                    "essential": true
+                  },
+                  {
+                    "id": "battery",
+                    "bytes": 9,
+                    "priority": 2,
+                    "allowCellular": true,
+                    "essential": false
+                  },
+                  {
+                    "id": "storage",
+                    "bytes": 9,
+                    "priority": 1,
+                    "allowCellular": true,
+                    "essential": true
+                  }
+                ]
+              },
+              "expected": {
+                "selectedIds": [],
+                "skipped": [
+                  {
+                    "id": "wifi",
+                    "reason": "wifi"
+                  },
+                  {
+                    "id": "battery",
+                    "reason": "battery"
+                  },
+                  {
+                    "id": "storage",
+                    "reason": "storage"
+                  }
+                ],
+                "remainingBytes": 0
+              }
+            },
+            {
+              "name": "essential обходит низкий заряд",
+              "input": {
+                "onWifi": false,
+                "batteryPercent": 10,
+                "minBatteryPercent": 20,
+                "storageBytes": 10,
+                "jobs": [
+                  {
+                    "id": "optional",
+                    "bytes": 3,
+                    "priority": 2,
+                    "allowCellular": true,
+                    "essential": false
+                  },
+                  {
+                    "id": "essential",
+                    "bytes": 3,
+                    "priority": 1,
+                    "allowCellular": true,
+                    "essential": true
+                  }
+                ]
+              },
+              "expected": {
+                "selectedIds": [
+                  "essential"
+                ],
+                "skipped": [
+                  {
+                    "id": "optional",
+                    "reason": "battery"
+                  }
+                ],
+                "remainingBytes": 7
+              }
+            },
+            {
+              "name": "заряд ровно на границе разрешён и одинаковый приоритет стабилен",
+              "input": {
+                "onWifi": true,
+                "batteryPercent": 20,
+                "minBatteryPercent": 20,
+                "storageBytes": 4,
+                "jobs": [
+                  {
+                    "id": "z",
+                    "bytes": 3,
+                    "priority": 0,
+                    "allowCellular": false,
+                    "essential": false
+                  },
+                  {
+                    "id": "a",
+                    "bytes": 3,
+                    "priority": 0,
+                    "allowCellular": false,
+                    "essential": false
+                  }
+                ]
+              },
+              "expected": {
+                "selectedIds": [
+                  "z"
+                ],
+                "skipped": [
+                  {
+                    "id": "a",
+                    "reason": "storage"
+                  }
+                ],
+                "remainingBytes": 1
+              }
+            },
+            {
+              "name": "нулевые размеры и отрицательные приоритеты",
+              "input": {
+                "onWifi": true,
+                "batteryPercent": 100,
+                "minBatteryPercent": 0,
+                "storageBytes": 0,
+                "jobs": [
+                  {
+                    "id": "later",
+                    "bytes": 0,
+                    "priority": -2,
+                    "allowCellular": false,
+                    "essential": false
+                  },
+                  {
+                    "id": "first",
+                    "bytes": 0,
+                    "priority": -1,
+                    "allowCellular": false,
+                    "essential": false
+                  }
+                ]
+              },
+              "expected": {
+                "selectedIds": [
+                  "first",
+                  "later"
+                ],
+                "skipped": [],
+                "remainingBytes": 0
+              }
+            },
+            {
+              "name": "нет загрузок место остаётся свободным",
+              "input": {
+                "onWifi": false,
+                "batteryPercent": 0,
+                "minBatteryPercent": 20,
+                "storageBytes": 42,
+                "jobs": []
+              },
+              "expected": {
+                "selectedIds": [],
+                "skipped": [],
+                "remainingBytes": 42
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "edium-js-2026-09-v3-boost": {
+      "direction": "Системная разработка (EdiumBoost)",
+      "languages": [
+        "javascript"
+      ],
+      "tasks": [
+        {
+          "id": "boost-button-cat",
+          "title": "Кот нажал все кнопки. Ужин всё ещё на первом шаге",
+          "summary": "Обработай кнопки рецепта: дребезг не должен превращать один тап в путешествие к десерту.",
+          "description": "Реализуй solve(input). stepCount — положительное число шагов рецепта, initialStep — индекс от 0 до stepCount-1, debounceMs — неотрицательное целое. events идут по неубыванию at (миллисекунды), имеют уникальный id, button из next/back/home и action из tap/hold. Для каждой кнопки отдельно игнорируй событие, если с последнего принятого события этой кнопки прошло строго меньше debounceMs. Игнорирование не обновляет это время; первое событие каждой кнопки всегда принимается. Принятый tap next прибавляет один шаг, tap back вычитает один; hold next переходит на последний шаг, hold back — на первый. home при любом action переходит на первый шаг. Индекс всегда остаётся в пределах рецепта. Даже на границе принятое нажатие обновляет время кнопки. Верни step, acceptedIds и ignoredIds в порядке обработки. Все числа — неотрицательные безопасные целые.",
+          "signature": "function solve(input) -> { step, acceptedIds, ignoredIds }",
+          "starterCode": "function solve(input) {\n  return { step: input.initialStep, acceptedIds: [], ignoredIds: [] }\n}\n",
+          "publicExampleCount": 2,
+          "tests": [
+            {
+              "name": "нажатия не выходят за границы рецепта",
+              "input": {
+                "stepCount": 2,
+                "initialStep": 0,
+                "debounceMs": 10,
+                "events": [
+                  {
+                    "id": "a",
+                    "at": 0,
+                    "button": "back",
+                    "action": "tap"
+                  },
+                  {
+                    "id": "b",
+                    "at": 10,
+                    "button": "next",
+                    "action": "tap"
+                  },
+                  {
+                    "id": "c",
+                    "at": 20,
+                    "button": "next",
+                    "action": "tap"
+                  }
+                ]
+              },
+              "expected": {
+                "step": 1,
+                "acceptedIds": [
+                  "a",
+                  "b",
+                  "c"
+                ],
+                "ignoredIds": []
+              }
+            },
+            {
+              "name": "ровно на границе окна нажатие принимается",
+              "input": {
+                "stepCount": 5,
+                "initialStep": 0,
+                "debounceMs": 100,
+                "events": [
+                  {
+                    "id": "a",
+                    "at": 0,
+                    "button": "next",
+                    "action": "tap"
+                  },
+                  {
+                    "id": "b",
+                    "at": 99,
+                    "button": "next",
+                    "action": "tap"
+                  },
+                  {
+                    "id": "c",
+                    "at": 100,
+                    "button": "next",
+                    "action": "tap"
+                  }
+                ]
+              },
+              "expected": {
+                "step": 2,
+                "acceptedIds": [
+                  "a",
+                  "c"
+                ],
+                "ignoredIds": [
+                  "b"
+                ]
+              }
+            },
+            {
+              "name": "дребезг не продлевает окно подавления",
+              "input": {
+                "stepCount": 5,
+                "initialStep": 0,
+                "debounceMs": 50,
+                "events": [
+                  {
+                    "id": "a",
+                    "at": 0,
+                    "button": "next",
+                    "action": "tap"
+                  },
+                  {
+                    "id": "b",
+                    "at": 20,
+                    "button": "next",
+                    "action": "tap"
+                  },
+                  {
+                    "id": "c",
+                    "at": 40,
+                    "button": "next",
+                    "action": "tap"
+                  },
+                  {
+                    "id": "d",
+                    "at": 50,
+                    "button": "next",
+                    "action": "tap"
+                  }
+                ]
+              },
+              "expected": {
+                "step": 2,
+                "acceptedIds": [
+                  "a",
+                  "d"
+                ],
+                "ignoredIds": [
+                  "b",
+                  "c"
+                ]
+              }
+            },
+            {
+              "name": "окно считается отдельно для каждой кнопки",
+              "input": {
+                "stepCount": 5,
+                "initialStep": 2,
+                "debounceMs": 100,
+                "events": [
+                  {
+                    "id": "a",
+                    "at": 0,
+                    "button": "next",
+                    "action": "tap"
+                  },
+                  {
+                    "id": "b",
+                    "at": 1,
+                    "button": "back",
+                    "action": "tap"
+                  },
+                  {
+                    "id": "c",
+                    "at": 2,
+                    "button": "home",
+                    "action": "tap"
+                  },
+                  {
+                    "id": "d",
+                    "at": 3,
+                    "button": "back",
+                    "action": "tap"
+                  }
+                ]
+              },
+              "expected": {
+                "step": 0,
+                "acceptedIds": [
+                  "a",
+                  "b",
+                  "c"
+                ],
+                "ignoredIds": [
+                  "d"
+                ]
+              }
+            },
+            {
+              "name": "удержания и домашняя кнопка переходят к нужной границе",
+              "input": {
+                "stepCount": 4,
+                "initialStep": 1,
+                "debounceMs": 0,
+                "events": [
+                  {
+                    "id": "a",
+                    "at": 0,
+                    "button": "next",
+                    "action": "hold"
+                  },
+                  {
+                    "id": "b",
+                    "at": 1,
+                    "button": "back",
+                    "action": "hold"
+                  },
+                  {
+                    "id": "c",
+                    "at": 2,
+                    "button": "next",
+                    "action": "tap"
+                  },
+                  {
+                    "id": "d",
+                    "at": 3,
+                    "button": "home",
+                    "action": "hold"
+                  }
+                ]
+              },
+              "expected": {
+                "step": 0,
+                "acceptedIds": [
+                  "a",
+                  "b",
+                  "c",
+                  "d"
+                ],
+                "ignoredIds": []
+              }
+            },
+            {
+              "name": "принятое нажатие на границе всё равно запускает окно",
+              "input": {
+                "stepCount": 2,
+                "initialStep": 1,
+                "debounceMs": 10,
+                "events": [
+                  {
+                    "id": "a",
+                    "at": 0,
+                    "button": "next",
+                    "action": "tap"
+                  },
+                  {
+                    "id": "b",
+                    "at": 1,
+                    "button": "back",
+                    "action": "tap"
+                  },
+                  {
+                    "id": "c",
+                    "at": 2,
+                    "button": "next",
+                    "action": "tap"
+                  }
+                ]
+              },
+              "expected": {
+                "step": 0,
+                "acceptedIds": [
+                  "a",
+                  "b"
+                ],
+                "ignoredIds": [
+                  "c"
+                ]
+              }
+            },
+            {
+              "name": "пустой журнал и рецепт из одного шага",
+              "input": {
+                "stepCount": 1,
+                "initialStep": 0,
+                "debounceMs": 0,
+                "events": []
+              },
+              "expected": {
+                "step": 0,
+                "acceptedIds": [],
+                "ignoredIds": []
+              }
+            }
+          ]
+        },
+        {
+          "id": "boost-lamp-queue",
+          "title": "Лампочка услышала «включись» семь раз",
+          "summary": "Собери очередь команд умного дома: повторы и опоздавшая доставка не должны устраивать дискотеку.",
+          "description": "Реализуй solve(input). devices — устройства с уникальным id и boolean online, maxAttempts — положительное целое. commands имеют commandId, deviceId, неотрицательные целые revision и attempts, action из on/off и boolean acked. Сначала оставь первое вхождение каждого commandId; команды неизвестным устройствам игнорируй. Для каждого устройства выбери команду с максимальной revision, при равенстве — последнюю в исходном массиве. Остальные команды окончательно вытеснены, даже если выбранная уже подтверждена или исчерпала попытки. Обходи выбранные команды в порядке devices: acked=true добавляет commandId в acknowledgedIds; иначе attempts>=maxAttempts — в abandonedIds; иначе online=false — в waitingIds; иначе в send добавь {commandId,deviceId,action,attempt:attempts+1}. Устройство без команд пропускается. Верни {send,waitingIds,abandonedIds,acknowledgedIds}.",
+          "signature": "function solve(input) -> { send, waitingIds, abandonedIds, acknowledgedIds }",
+          "starterCode": "function solve(input) {\n  return { send: [], waitingIds: [], abandonedIds: [], acknowledgedIds: [] }\n}\n",
+          "publicExampleCount": 2,
+          "tests": [
+            {
+              "name": "новая команда вытесняет старую независимо от доставки",
+              "input": {
+                "devices": [
+                  {
+                    "id": "lamp",
+                    "online": true
+                  }
+                ],
+                "maxAttempts": 3,
+                "commands": [
+                  {
+                    "commandId": "new",
+                    "deviceId": "lamp",
+                    "revision": 3,
+                    "attempts": 1,
+                    "action": "off",
+                    "acked": false
+                  },
+                  {
+                    "commandId": "old",
+                    "deviceId": "lamp",
+                    "revision": 1,
+                    "attempts": 0,
+                    "action": "on",
+                    "acked": false
+                  }
+                ]
+              },
+              "expected": {
+                "send": [
+                  {
+                    "commandId": "new",
+                    "deviceId": "lamp",
+                    "action": "off",
+                    "attempt": 2
+                  }
+                ],
+                "waitingIds": [],
+                "abandonedIds": [],
+                "acknowledgedIds": []
+              }
+            },
+            {
+              "name": "подтверждённая команда не воскрешает старую",
+              "input": {
+                "devices": [
+                  {
+                    "id": "lamp",
+                    "online": true
+                  }
+                ],
+                "maxAttempts": 3,
+                "commands": [
+                  {
+                    "commandId": "old",
+                    "deviceId": "lamp",
+                    "revision": 1,
+                    "attempts": 0,
+                    "action": "on",
+                    "acked": false
+                  },
+                  {
+                    "commandId": "done",
+                    "deviceId": "lamp",
+                    "revision": 2,
+                    "attempts": 1,
+                    "action": "off",
+                    "acked": true
+                  }
+                ]
+              },
+              "expected": {
+                "send": [],
+                "waitingIds": [],
+                "abandonedIds": [],
+                "acknowledgedIds": [
+                  "done"
+                ]
+              }
+            },
+            {
+              "name": "статусы и попытки применяются в явном порядке",
+              "input": {
+                "devices": [
+                  {
+                    "id": "a",
+                    "online": false
+                  },
+                  {
+                    "id": "b",
+                    "online": false
+                  },
+                  {
+                    "id": "c",
+                    "online": true
+                  },
+                  {
+                    "id": "d",
+                    "online": false
+                  }
+                ],
+                "maxAttempts": 2,
+                "commands": [
+                  {
+                    "commandId": "c",
+                    "deviceId": "c",
+                    "revision": 1,
+                    "attempts": 1,
+                    "action": "on",
+                    "acked": false
+                  },
+                  {
+                    "commandId": "b",
+                    "deviceId": "b",
+                    "revision": 1,
+                    "attempts": 2,
+                    "action": "off",
+                    "acked": false
+                  },
+                  {
+                    "commandId": "a",
+                    "deviceId": "a",
+                    "revision": 1,
+                    "attempts": 0,
+                    "action": "on",
+                    "acked": false
+                  },
+                  {
+                    "commandId": "d",
+                    "deviceId": "d",
+                    "revision": 1,
+                    "attempts": 9,
+                    "action": "on",
+                    "acked": true
+                  }
+                ]
+              },
+              "expected": {
+                "send": [
+                  {
+                    "commandId": "c",
+                    "deviceId": "c",
+                    "action": "on",
+                    "attempt": 2
+                  }
+                ],
+                "waitingIds": [
+                  "a"
+                ],
+                "abandonedIds": [
+                  "b"
+                ],
+                "acknowledgedIds": [
+                  "d"
+                ]
+              }
+            },
+            {
+              "name": "повтор commandId сохраняет первое содержимое",
+              "input": {
+                "devices": [
+                  {
+                    "id": "lamp",
+                    "online": true
+                  }
+                ],
+                "maxAttempts": 3,
+                "commands": [
+                  {
+                    "commandId": "same",
+                    "deviceId": "lamp",
+                    "revision": 1,
+                    "attempts": 0,
+                    "action": "on",
+                    "acked": false
+                  },
+                  {
+                    "commandId": "same",
+                    "deviceId": "lamp",
+                    "revision": 9,
+                    "attempts": 0,
+                    "action": "off",
+                    "acked": true
+                  }
+                ]
+              },
+              "expected": {
+                "send": [
+                  {
+                    "commandId": "same",
+                    "deviceId": "lamp",
+                    "action": "on",
+                    "attempt": 1
+                  }
+                ],
+                "waitingIds": [],
+                "abandonedIds": [],
+                "acknowledgedIds": []
+              }
+            },
+            {
+              "name": "при равной revision побеждает поздняя команда",
+              "input": {
+                "devices": [
+                  {
+                    "id": "lamp",
+                    "online": true
+                  }
+                ],
+                "maxAttempts": 1,
+                "commands": [
+                  {
+                    "commandId": "a",
+                    "deviceId": "lamp",
+                    "revision": 2,
+                    "attempts": 0,
+                    "action": "on",
+                    "acked": false
+                  },
+                  {
+                    "commandId": "b",
+                    "deviceId": "lamp",
+                    "revision": 2,
+                    "attempts": 0,
+                    "action": "off",
+                    "acked": false
+                  }
+                ]
+              },
+              "expected": {
+                "send": [
+                  {
+                    "commandId": "b",
+                    "deviceId": "lamp",
+                    "action": "off",
+                    "attempt": 1
+                  }
+                ],
+                "waitingIds": [],
+                "abandonedIds": [],
+                "acknowledgedIds": []
+              }
+            },
+            {
+              "name": "неизвестное устройство игнорируется после глобального удаления повторов",
+              "input": {
+                "devices": [
+                  {
+                    "id": "lamp",
+                    "online": true
+                  }
+                ],
+                "maxAttempts": 3,
+                "commands": [
+                  {
+                    "commandId": "same",
+                    "deviceId": "ghost",
+                    "revision": 1,
+                    "attempts": 0,
+                    "action": "on",
+                    "acked": false
+                  },
+                  {
+                    "commandId": "same",
+                    "deviceId": "lamp",
+                    "revision": 2,
+                    "attempts": 0,
+                    "action": "on",
+                    "acked": false
+                  }
+                ]
+              },
+              "expected": {
+                "send": [],
+                "waitingIds": [],
+                "abandonedIds": [],
+                "acknowledgedIds": []
+              }
+            },
+            {
+              "name": "пустая очередь ничего не отправляет",
+              "input": {
+                "devices": [
+                  {
+                    "id": "lamp",
+                    "online": true
+                  }
+                ],
+                "maxAttempts": 3,
+                "commands": []
+              },
+              "expected": {
+                "send": [],
+                "waitingIds": [],
+                "abandonedIds": [],
+                "acknowledgedIds": []
+              }
+            }
+          ]
+        },
+        {
+          "id": "boost-weather-card",
+          "title": "Погода вчерашняя, уверенность сегодняшняя",
+          "summary": "Сохрани полезную карточку на экране Boost при сбоях сервиса и покажи, когда ей уже нельзя безоговорочно верить.",
+          "description": "Реализуй solve(input). now и ttl — неотрицательные целые секунды. cards имеют уникальный id, JSON-значение value, revision и updatedAt<=now; начальный error=false. events идут в порядке доставки и содержат cardId, revision, at, boolean ok и value. Игнорируй неизвестные карточки, события из будущего (at>now) и revision не больше уже принятой. Принятое событие всегда обновляет revision: при ok=true обнови value и updatedAt=at, сбрось error; при ok=false сохрани прежние value/updatedAt и установи error=true. Верни cards в исходном порядке как {id,value,revision,stale,error}, где stale=(now-updatedAt>=ttl). Для visible выбери активное предупреждение из alerts (startsAt<=now<endsAt) с максимальным priority; при равенстве — первое в alerts. Тогда visible={kind:'alert',id,text}. Если активных нет, visible={kind:'card',id:selectedId}; selectedId гарантированно существует. У предупреждений уникальные id, целый priority, startsAt<endsAt и строка text. Все числа безопасные целые, revision и время неотрицательны.",
+          "signature": "function solve(input) -> { cards, visible }",
+          "starterCode": "function solve(input) {\n  return { cards: [], visible: { kind: 'card', id: input.selectedId } }\n}\n",
+          "publicExampleCount": 2,
+          "tests": [
+            {
+              "name": "опоздавшая версия не откатывает погоду",
+              "input": {
+                "now": 100,
+                "ttl": 30,
+                "selectedId": "weather",
+                "cards": [
+                  {
+                    "id": "weather",
+                    "value": 10,
+                    "revision": 1,
+                    "updatedAt": 20
+                  }
+                ],
+                "events": [
+                  {
+                    "cardId": "weather",
+                    "revision": 3,
+                    "at": 90,
+                    "ok": true,
+                    "value": 15
+                  },
+                  {
+                    "cardId": "weather",
+                    "revision": 2,
+                    "at": 95,
+                    "ok": true,
+                    "value": 12
+                  }
+                ],
+                "alerts": []
+              },
+              "expected": {
+                "cards": [
+                  {
+                    "id": "weather",
+                    "value": 15,
+                    "revision": 3,
+                    "stale": false,
+                    "error": false
+                  }
+                ],
+                "visible": {
+                  "kind": "card",
+                  "id": "weather"
+                }
+              }
+            },
+            {
+              "name": "ошибка оставляет данные и время последнего успеха",
+              "input": {
+                "now": 100,
+                "ttl": 20,
+                "selectedId": "weather",
+                "cards": [
+                  {
+                    "id": "weather",
+                    "value": 10,
+                    "revision": 1,
+                    "updatedAt": 70
+                  }
+                ],
+                "events": [
+                  {
+                    "cardId": "weather",
+                    "revision": 3,
+                    "at": 99,
+                    "ok": false,
+                    "value": null
+                  },
+                  {
+                    "cardId": "weather",
+                    "revision": 2,
+                    "at": 99,
+                    "ok": true,
+                    "value": 99
+                  }
+                ],
+                "alerts": []
+              },
+              "expected": {
+                "cards": [
+                  {
+                    "id": "weather",
+                    "value": 10,
+                    "revision": 3,
+                    "stale": true,
+                    "error": true
+                  }
+                ],
+                "visible": {
+                  "kind": "card",
+                  "id": "weather"
+                }
+              }
+            },
+            {
+              "name": "успешная версия снимает ошибку и принимает null как данные",
+              "input": {
+                "now": 100,
+                "ttl": 20,
+                "selectedId": "home",
+                "cards": [
+                  {
+                    "id": "home",
+                    "value": {
+                      "on": true
+                    },
+                    "revision": 0,
+                    "updatedAt": 1
+                  }
+                ],
+                "events": [
+                  {
+                    "cardId": "home",
+                    "revision": 1,
+                    "at": 90,
+                    "ok": false,
+                    "value": "oops"
+                  },
+                  {
+                    "cardId": "home",
+                    "revision": 2,
+                    "at": 99,
+                    "ok": true,
+                    "value": null
+                  }
+                ],
+                "alerts": []
+              },
+              "expected": {
+                "cards": [
+                  {
+                    "id": "home",
+                    "value": null,
+                    "revision": 2,
+                    "stale": false,
+                    "error": false
+                  }
+                ],
+                "visible": {
+                  "kind": "card",
+                  "id": "home"
+                }
+              }
+            },
+            {
+              "name": "будущее и неизвестные карточки не двигают revision",
+              "input": {
+                "now": 100,
+                "ttl": 10,
+                "selectedId": "a",
+                "cards": [
+                  {
+                    "id": "a",
+                    "value": "old",
+                    "revision": 1,
+                    "updatedAt": 99
+                  }
+                ],
+                "events": [
+                  {
+                    "cardId": "a",
+                    "revision": 99,
+                    "at": 101,
+                    "ok": true,
+                    "value": "future"
+                  },
+                  {
+                    "cardId": "ghost",
+                    "revision": 1,
+                    "at": 100,
+                    "ok": true,
+                    "value": "ghost"
+                  },
+                  {
+                    "cardId": "a",
+                    "revision": 2,
+                    "at": 100,
+                    "ok": true,
+                    "value": "present"
+                  }
+                ],
+                "alerts": []
+              },
+              "expected": {
+                "cards": [
+                  {
+                    "id": "a",
+                    "value": "present",
+                    "revision": 2,
+                    "stale": false,
+                    "error": false
+                  }
+                ],
+                "visible": {
+                  "kind": "card",
+                  "id": "a"
+                }
+              }
+            },
+            {
+              "name": "граница ttl включена и равная revision не заменяет значение",
+              "input": {
+                "now": 100,
+                "ttl": 10,
+                "selectedId": "a",
+                "cards": [
+                  {
+                    "id": "a",
+                    "value": 1,
+                    "revision": 2,
+                    "updatedAt": 90
+                  },
+                  {
+                    "id": "b",
+                    "value": 2,
+                    "revision": 1,
+                    "updatedAt": 91
+                  }
+                ],
+                "events": [
+                  {
+                    "cardId": "a",
+                    "revision": 2,
+                    "at": 100,
+                    "ok": true,
+                    "value": 99
+                  }
+                ],
+                "alerts": []
+              },
+              "expected": {
+                "cards": [
+                  {
+                    "id": "a",
+                    "value": 1,
+                    "revision": 2,
+                    "stale": true,
+                    "error": false
+                  },
+                  {
+                    "id": "b",
+                    "value": 2,
+                    "revision": 1,
+                    "stale": false,
+                    "error": false
+                  }
+                ],
+                "visible": {
+                  "kind": "card",
+                  "id": "a"
+                }
+              }
+            },
+            {
+              "name": "приоритет предупреждения и границы активности",
+              "input": {
+                "now": 100,
+                "ttl": 10,
+                "selectedId": "a",
+                "cards": [
+                  {
+                    "id": "a",
+                    "value": 1,
+                    "revision": 1,
+                    "updatedAt": 100
+                  }
+                ],
+                "events": [],
+                "alerts": [
+                  {
+                    "id": "finished",
+                    "priority": 99,
+                    "startsAt": 0,
+                    "endsAt": 100,
+                    "text": "Поздно"
+                  },
+                  {
+                    "id": "low",
+                    "priority": 1,
+                    "startsAt": 0,
+                    "endsAt": 200,
+                    "text": "Чай"
+                  },
+                  {
+                    "id": "first",
+                    "priority": 3,
+                    "startsAt": 100,
+                    "endsAt": 200,
+                    "text": "Плита"
+                  },
+                  {
+                    "id": "second",
+                    "priority": 3,
+                    "startsAt": 0,
+                    "endsAt": 200,
+                    "text": "Кот"
+                  },
+                  {
+                    "id": "future",
+                    "priority": 100,
+                    "startsAt": 101,
+                    "endsAt": 200,
+                    "text": "Завтра"
+                  }
+                ]
+              },
+              "expected": {
+                "cards": [
+                  {
+                    "id": "a",
+                    "value": 1,
+                    "revision": 1,
+                    "stale": false,
+                    "error": false
+                  }
+                ],
+                "visible": {
+                  "kind": "alert",
+                  "id": "first",
+                  "text": "Плита"
+                }
+              }
+            },
+            {
+              "name": "нулевой ttl сразу помечает карточку устаревшей",
+              "input": {
+                "now": 0,
+                "ttl": 0,
+                "selectedId": "a",
+                "cards": [
+                  {
+                    "id": "a",
+                    "value": 0,
+                    "revision": 0,
+                    "updatedAt": 0
+                  }
+                ],
+                "events": [],
+                "alerts": []
+              },
+              "expected": {
+                "cards": [
+                  {
+                    "id": "a",
+                    "value": 0,
+                    "revision": 0,
+                    "stale": true,
+                    "error": false
+                  }
+                ],
+                "visible": {
+                  "kind": "card",
+                  "id": "a"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "edium-js-2026-09-v3-backend": {
+      "direction": "Бэкенд",
+      "languages": [
+        "javascript"
+      ],
+      "tasks": [
+        {
+          "id": "notification-bouncer",
+          "title": "Фейсконтроль для пушей",
+          "summary": "Помоги пушам отличить важное сообщение от очередного «ну что, учимся?».",
+          "description": "Реализуй solve(input). nowMinute, quiet.start и quiet.end — целые минуты от 0 до 1439. Тихие часы включают start, но не end; интервал может пересекать полночь, а start === end отключает его. Обработай notifications в исходном порядке. Первое уведомление с каждым id учитывается, все следующие попадают в duplicateIds, даже если первое было заглушено. Канал должен входить в enabledChannels. Во время тихих часов отправляй только urgent === true; срочность не включает отключённый канал. Верни deliveredIds, mutedIds и duplicateIds в порядке обработки. Все поля присутствуют, id и channel — строки.",
+          "signature": "function solve(input) -> { deliveredIds, mutedIds, duplicateIds }",
+          "starterCode": "function solve(input) {\n  return { deliveredIds: [], mutedIds: [], duplicateIds: [] }\n}\n",
+          "publicExampleCount": 2,
+          "tests": [
+            {
+              "name": "ночью проходит только срочное",
+              "input": {
+                "nowMinute": 30,
+                "quiet": {
+                  "start": 1380,
+                  "end": 480
+                },
+                "enabledChannels": [
+                  "study"
+                ],
+                "notifications": [
+                  {
+                    "id": "cat",
+                    "channel": "study",
+                    "urgent": false
+                  },
+                  {
+                    "id": "fire",
+                    "channel": "study",
+                    "urgent": true
+                  }
+                ]
+              },
+              "expected": {
+                "deliveredIds": [
+                  "fire"
+                ],
+                "mutedIds": [
+                  "cat"
+                ],
+                "duplicateIds": []
+              }
+            },
+            {
+              "name": "отключённый канал не спасает срочность",
+              "input": {
+                "nowMinute": 800,
+                "quiet": {
+                  "start": 0,
+                  "end": 0
+                },
+                "enabledChannels": [],
+                "notifications": [
+                  {
+                    "id": "boss",
+                    "channel": "ads",
+                    "urgent": true
+                  }
+                ]
+              },
+              "expected": {
+                "deliveredIds": [],
+                "mutedIds": [
+                  "boss"
+                ],
+                "duplicateIds": []
+              }
+            },
+            {
+              "name": "первый дубль остаётся первым",
+              "input": {
+                "nowMinute": 700,
+                "quiet": {
+                  "start": 0,
+                  "end": 0
+                },
+                "enabledChannels": [
+                  "study"
+                ],
+                "notifications": [
+                  {
+                    "id": "x",
+                    "channel": "ads",
+                    "urgent": false
+                  },
+                  {
+                    "id": "x",
+                    "channel": "study",
+                    "urgent": true
+                  },
+                  {
+                    "id": "x",
+                    "channel": "study",
+                    "urgent": false
+                  }
+                ]
+              },
+              "expected": {
+                "deliveredIds": [],
+                "mutedIds": [
+                  "x"
+                ],
+                "duplicateIds": [
+                  "x",
+                  "x"
+                ]
+              }
+            },
+            {
+              "name": "начало тихих часов включительно",
+              "input": {
+                "nowMinute": 600,
+                "quiet": {
+                  "start": 600,
+                  "end": 900
+                },
+                "enabledChannels": [
+                  "study"
+                ],
+                "notifications": [
+                  {
+                    "id": "x",
+                    "channel": "study",
+                    "urgent": false
+                  }
+                ]
+              },
+              "expected": {
+                "deliveredIds": [],
+                "mutedIds": [
+                  "x"
+                ],
+                "duplicateIds": []
+              }
+            },
+            {
+              "name": "конец тихих часов уже шумный",
+              "input": {
+                "nowMinute": 480,
+                "quiet": {
+                  "start": 1380,
+                  "end": 480
+                },
+                "enabledChannels": [
+                  "study"
+                ],
+                "notifications": [
+                  {
+                    "id": "x",
+                    "channel": "study",
+                    "urgent": false
+                  }
+                ]
+              },
+              "expected": {
+                "deliveredIds": [
+                  "x"
+                ],
+                "mutedIds": [],
+                "duplicateIds": []
+              }
+            },
+            {
+              "name": "ноль уведомлений — тоже спокойствие",
+              "input": {
+                "nowMinute": 0,
+                "quiet": {
+                  "start": 0,
+                  "end": 0
+                },
+                "enabledChannels": [],
+                "notifications": []
+              },
+              "expected": {
+                "deliveredIds": [],
+                "mutedIds": [],
+                "duplicateIds": []
+              }
+            }
+          ]
+        },
+        {
+          "id": "cart-without-drama",
+          "title": "Купон «почти бесплатно»",
+          "summary": "Посчитай корзину курсов так, чтобы бухгалтер не начал проходить курс медитации.",
+          "description": "Все цены и суммы — целые копейки; quantity — целое неотрицательное число. subtotal — сумма price × quantity. Можно применить ровно один из coupons: kind='fixed' даёт value копеек, kind='percent' — floor(subtotal × value / 100). Проценты лежат от 0 до 100, фиксированные скидки неотрицательны. Ограничь скидку subtotal. Выбери наибольшую скидку, при равенстве — первый купон в массиве. Если скидка равна нулю, couponId=null. Доставка равна deliveryFee, если subtotal > 0 и сумма после скидки меньше freeDeliveryFrom; иначе доставка бесплатна. Верни subtotal, discount, couponId, shipping, total. Пустая корзина имеет subtotal=0.",
+          "signature": "function solve(input) -> { subtotal, discount, couponId, shipping, total }",
+          "starterCode": "function solve(input) {\n  return { subtotal: 0, discount: 0, couponId: null, shipping: 0, total: 0 }\n}\n",
+          "publicExampleCount": 2,
+          "tests": [
+            {
+              "name": "больший процент побеждает фиксированный купон",
+              "input": {
+                "items": [
+                  {
+                    "price": 1000,
+                    "quantity": 2
+                  }
+                ],
+                "coupons": [
+                  {
+                    "id": "tea",
+                    "kind": "fixed",
+                    "value": 100
+                  },
+                  {
+                    "id": "wow",
+                    "kind": "percent",
+                    "value": 20
+                  }
+                ],
+                "deliveryFee": 200,
+                "freeDeliveryFrom": 1800
+              },
+              "expected": {
+                "subtotal": 2000,
+                "discount": 400,
+                "couponId": "wow",
+                "shipping": 200,
+                "total": 1800
+              }
+            },
+            {
+              "name": "скидка не превращает магазин в банкомат",
+              "input": {
+                "items": [
+                  {
+                    "price": 100,
+                    "quantity": 1
+                  }
+                ],
+                "coupons": [
+                  {
+                    "id": "oops",
+                    "kind": "fixed",
+                    "value": 500
+                  }
+                ],
+                "deliveryFee": 40,
+                "freeDeliveryFrom": 100
+              },
+              "expected": {
+                "subtotal": 100,
+                "discount": 100,
+                "couponId": "oops",
+                "shipping": 40,
+                "total": 40
+              }
+            },
+            {
+              "name": "равные скидки выбирают первый купон",
+              "input": {
+                "items": [
+                  {
+                    "price": 200,
+                    "quantity": 1
+                  }
+                ],
+                "coupons": [
+                  {
+                    "id": "first",
+                    "kind": "percent",
+                    "value": 10
+                  },
+                  {
+                    "id": "second",
+                    "kind": "fixed",
+                    "value": 20
+                  }
+                ],
+                "deliveryFee": 50,
+                "freeDeliveryFrom": 180
+              },
+              "expected": {
+                "subtotal": 200,
+                "discount": 20,
+                "couponId": "first",
+                "shipping": 0,
+                "total": 180
+              }
+            },
+            {
+              "name": "проценты округляются вниз",
+              "input": {
+                "items": [
+                  {
+                    "price": 999,
+                    "quantity": 1
+                  }
+                ],
+                "coupons": [
+                  {
+                    "id": "third",
+                    "kind": "percent",
+                    "value": 33
+                  }
+                ],
+                "deliveryFee": 10,
+                "freeDeliveryFrom": 1000
+              },
+              "expected": {
+                "subtotal": 999,
+                "discount": 329,
+                "couponId": "third",
+                "shipping": 10,
+                "total": 680
+              }
+            },
+            {
+              "name": "пустую корзину не доставляем",
+              "input": {
+                "items": [],
+                "coupons": [
+                  {
+                    "id": "free",
+                    "kind": "fixed",
+                    "value": 100
+                  }
+                ],
+                "deliveryFee": 90,
+                "freeDeliveryFrom": 100
+              },
+              "expected": {
+                "subtotal": 0,
+                "discount": 0,
+                "couponId": null,
+                "shipping": 0,
+                "total": 0
+              }
+            },
+            {
+              "name": "нулевой купон и точный порог доставки",
+              "input": {
+                "items": [
+                  {
+                    "price": 100,
+                    "quantity": 2
+                  },
+                  {
+                    "price": 999,
+                    "quantity": 0
+                  }
+                ],
+                "coupons": [
+                  {
+                    "id": "nothing",
+                    "kind": "fixed",
+                    "value": 0
+                  }
+                ],
+                "deliveryFee": 50,
+                "freeDeliveryFrom": 200
+              },
+              "expected": {
+                "subtotal": 200,
+                "discount": 0,
+                "couponId": null,
+                "shipping": 0,
+                "total": 200
+              }
+            }
+          ]
+        },
+        {
+          "id": "subscription-night-shift",
+          "title": "Подписка после полуночи",
+          "summary": "Три тарифа, один ученик и письмо «куда делись мои уроки?». Собери доступ по правилам.",
+          "description": "day — целый номер дня. plans имеют уникальные id, целые startsDay/endsDay (startsDay<endsDay), boolean revoked и quotas — объект лимитов функций. План активен при startsDay<=day<endsDay и revoked=false. Значение quota — неотрицательное целое или null, означающее безлимит. Для каждой функции из активных планов выбери максимальный лимит; null сильнее любого числа. Нулевые лимиты сохраняй. Верни activePlanIds, отсортированные стандартным JS .sort(), и quotas — объединённые лимиты; если активных планов нет, quotas={}. Не суммируй лимиты: два пробника не превращаются в премиум.",
+          "signature": "function solve(input) -> { activePlanIds, quotas }",
+          "starterCode": "function solve(input) {\n  return { activePlanIds: [], quotas: {} }\n}\n",
+          "publicExampleCount": 2,
+          "tests": [
+            {
+              "name": "лимиты объединяются по максимуму",
+              "input": {
+                "day": 5,
+                "plans": [
+                  {
+                    "id": "base",
+                    "startsDay": 0,
+                    "endsDay": 10,
+                    "revoked": false,
+                    "quotas": {
+                      "lessons": 3,
+                      "chat": 0
+                    }
+                  },
+                  {
+                    "id": "extra",
+                    "startsDay": 4,
+                    "endsDay": 6,
+                    "revoked": false,
+                    "quotas": {
+                      "lessons": 5,
+                      "ai": 2
+                    }
+                  }
+                ]
+              },
+              "expected": {
+                "activePlanIds": [
+                  "base",
+                  "extra"
+                ],
+                "quotas": {
+                  "lessons": 5,
+                  "chat": 0,
+                  "ai": 2
+                }
+              }
+            },
+            {
+              "name": "безлимит сильнее чисел",
+              "input": {
+                "day": 1,
+                "plans": [
+                  {
+                    "id": "z",
+                    "startsDay": 0,
+                    "endsDay": 2,
+                    "revoked": false,
+                    "quotas": {
+                      "lessons": null
+                    }
+                  },
+                  {
+                    "id": "a",
+                    "startsDay": 0,
+                    "endsDay": 2,
+                    "revoked": false,
+                    "quotas": {
+                      "lessons": 100
+                    }
+                  }
+                ]
+              },
+              "expected": {
+                "activePlanIds": [
+                  "a",
+                  "z"
+                ],
+                "quotas": {
+                  "lessons": null
+                }
+              }
+            },
+            {
+              "name": "начало включено, конец исключён",
+              "input": {
+                "day": 5,
+                "plans": [
+                  {
+                    "id": "old",
+                    "startsDay": 0,
+                    "endsDay": 5,
+                    "revoked": false,
+                    "quotas": {
+                      "chat": 9
+                    }
+                  },
+                  {
+                    "id": "new",
+                    "startsDay": 5,
+                    "endsDay": 10,
+                    "revoked": false,
+                    "quotas": {
+                      "chat": 1
+                    }
+                  }
+                ]
+              },
+              "expected": {
+                "activePlanIds": [
+                  "new"
+                ],
+                "quotas": {
+                  "chat": 1
+                }
+              }
+            },
+            {
+              "name": "отозванный и будущий планы не дают доступа",
+              "input": {
+                "day": 2,
+                "plans": [
+                  {
+                    "id": "revoked",
+                    "startsDay": 0,
+                    "endsDay": 10,
+                    "revoked": true,
+                    "quotas": {
+                      "all": null
+                    }
+                  },
+                  {
+                    "id": "future",
+                    "startsDay": 3,
+                    "endsDay": 10,
+                    "revoked": false,
+                    "quotas": {
+                      "all": null
+                    }
+                  }
+                ]
+              },
+              "expected": {
+                "activePlanIds": [],
+                "quotas": {}
+              }
+            },
+            {
+              "name": "план может быть активным без лимитов",
+              "input": {
+                "day": 0,
+                "plans": [
+                  {
+                    "id": "empty",
+                    "startsDay": 0,
+                    "endsDay": 1,
+                    "revoked": false,
+                    "quotas": {}
+                  }
+                ]
+              },
+              "expected": {
+                "activePlanIds": [
+                  "empty"
+                ],
+                "quotas": {}
+              }
+            },
+            {
+              "name": "пока нет подписок",
+              "input": {
+                "day": 0,
+                "plans": []
+              },
+              "expected": {
+                "activePlanIds": [],
+                "quotas": {}
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "edium-js-2026-09-v3-frontend": {
+      "direction": "Фронтенд",
+      "tasks": [
+        {
+          "id": "card-casting",
+          "title": "Карточки не влезли в макет",
+          "summary": "В Figma было просторно. Потом пришёл экран телефона и попросил объяснений.",
+          "description": "width, padding, gap, count — неотрицательные целые, minCardWidth и maxColumns — положительные целые. Рабочая ширина available=max(0,width-2×padding). Если count=0, верни {columns:0,cardWidth:0,rows:0}. Иначе выбери максимальное целое columns от 1 до min(maxColumns,count), при котором columns×minCardWidth+(columns-1)×gap <= available. Если даже одна минимальная карточка не помещается, всё равно columns=1. cardWidth=floor((available-(columns-1)×gap)/columns). rows=ceil(count/columns). Никаких размеров браузера получать не нужно: всё уже в input.",
+          "signature": "function solve(input) -> { columns, cardWidth, rows }",
+          "starterCode": "function solve(input) {\n  return { columns: 0, cardWidth: 0, rows: 0 }\n}\n",
+          "publicExampleCount": 2,
+          "tests": [
+            {
+              "name": "десктоп принимает три колонки",
+              "input": {
+                "width": 1000,
+                "padding": 20,
+                "gap": 20,
+                "count": 8,
+                "minCardWidth": 250,
+                "maxColumns": 4
+              },
+              "expected": {
+                "columns": 3,
+                "cardWidth": 306,
+                "rows": 3
+              }
+            },
+            {
+              "name": "телефон оставляет одну карточку",
+              "input": {
+                "width": 200,
+                "padding": 16,
+                "gap": 12,
+                "count": 3,
+                "minCardWidth": 240,
+                "maxColumns": 4
+              },
+              "expected": {
+                "columns": 1,
+                "cardWidth": 168,
+                "rows": 3
+              }
+            },
+            {
+              "name": "точное попадание в ширину",
+              "input": {
+                "width": 620,
+                "padding": 0,
+                "gap": 20,
+                "count": 4,
+                "minCardWidth": 300,
+                "maxColumns": 4
+              },
+              "expected": {
+                "columns": 2,
+                "cardWidth": 300,
+                "rows": 2
+              }
+            },
+            {
+              "name": "колонок не больше самих карточек",
+              "input": {
+                "width": 1000,
+                "padding": 0,
+                "gap": 10,
+                "count": 2,
+                "minCardWidth": 100,
+                "maxColumns": 5
+              },
+              "expected": {
+                "columns": 2,
+                "cardWidth": 495,
+                "rows": 1
+              }
+            },
+            {
+              "name": "паддинги съели весь экран",
+              "input": {
+                "width": 20,
+                "padding": 20,
+                "gap": 10,
+                "count": 1,
+                "minCardWidth": 100,
+                "maxColumns": 3
+              },
+              "expected": {
+                "columns": 1,
+                "cardWidth": 0,
+                "rows": 1
+              }
+            },
+            {
+              "name": "пустой список без невидимых колонок",
+              "input": {
+                "width": 800,
+                "padding": 10,
+                "gap": 10,
+                "count": 0,
+                "minCardWidth": 100,
+                "maxColumns": 3
+              },
+              "expected": {
+                "columns": 0,
+                "cardWidth": 0,
+                "rows": 0
+              }
+            },
+            {
+              "name": "лимит макета важнее свободной ширины",
+              "input": {
+                "width": 1000,
+                "padding": 0,
+                "gap": 0,
+                "count": 10,
+                "minCardWidth": 100,
+                "maxColumns": 2
+              },
+              "expected": {
+                "columns": 2,
+                "cardWidth": 500,
+                "rows": 5
+              }
+            }
+          ]
+        },
+        {
+          "id": "palette-police",
+          "title": "Пятьдесят оттенков «не читается»",
+          "summary": "Проверь контраст текстов, пока светло-серый текст не стал секретным.",
+          "description": "elements имеют уникальные id, числа foreground/background от 0 до 1 — уже вычисленные относительные яркости, положительный fontSize в пикселях и boolean bold. Контраст=(max(foreground,background)+0.05)/(min(foreground,background)+0.05). Требуется контраст >=3, если fontSize>=24 либо fontSize>=18 и bold=true; для остальных >=4.5. Сравнивай без предварительного округления. Верни failedIds в порядке elements и passedCount. Цвета RGB пересчитывать не нужно.",
+          "signature": "function solve(input) -> { failedIds, passedCount }",
+          "starterCode": "function solve(input) {\n  return { failedIds: [], passedCount: 0 }\n}\n",
+          "publicExampleCount": 2,
+          "tests": [
+            {
+              "name": "серый текст не всегда проходит",
+              "input": {
+                "elements": [
+                  {
+                    "id": "body",
+                    "foreground": 0.5,
+                    "background": 1,
+                    "fontSize": 16,
+                    "bold": false
+                  },
+                  {
+                    "id": "title",
+                    "foreground": 0,
+                    "background": 1,
+                    "fontSize": 24,
+                    "bold": false
+                  }
+                ]
+              },
+              "expected": {
+                "failedIds": [
+                  "body"
+                ],
+                "passedCount": 1
+              }
+            },
+            {
+              "name": "жирный текст от 18 считается крупным",
+              "input": {
+                "elements": [
+                  {
+                    "id": "bold",
+                    "foreground": 0,
+                    "background": 0.15,
+                    "fontSize": 18,
+                    "bold": true
+                  },
+                  {
+                    "id": "regular",
+                    "foreground": 0,
+                    "background": 0.15,
+                    "fontSize": 18,
+                    "bold": false
+                  }
+                ]
+              },
+              "expected": {
+                "failedIds": [
+                  "regular"
+                ],
+                "passedCount": 1
+              }
+            },
+            {
+              "name": "контраст работает в тёмной теме",
+              "input": {
+                "elements": [
+                  {
+                    "id": "light",
+                    "foreground": 1,
+                    "background": 0,
+                    "fontSize": 12,
+                    "bold": false
+                  }
+                ]
+              },
+              "expected": {
+                "failedIds": [],
+                "passedCount": 1
+              }
+            },
+            {
+              "name": "равные цвета дают единицу",
+              "input": {
+                "elements": [
+                  {
+                    "id": "ghost",
+                    "foreground": 0.4,
+                    "background": 0.4,
+                    "fontSize": 50,
+                    "bold": true
+                  }
+                ]
+              },
+              "expected": {
+                "failedIds": [
+                  "ghost"
+                ],
+                "passedCount": 0
+              }
+            },
+            {
+              "name": "чуть меньше 24 ещё обычный текст",
+              "input": {
+                "elements": [
+                  {
+                    "id": "small",
+                    "foreground": 0,
+                    "background": 0.15,
+                    "fontSize": 23,
+                    "bold": false
+                  },
+                  {
+                    "id": "large",
+                    "foreground": 0,
+                    "background": 0.15,
+                    "fontSize": 24,
+                    "bold": false
+                  }
+                ]
+              },
+              "expected": {
+                "failedIds": [
+                  "small"
+                ],
+                "passedCount": 1
+              }
+            },
+            {
+              "name": "пустой экран не содержит ошибок контраста",
+              "input": {
+                "elements": []
+              },
+              "expected": {
+                "failedIds": [],
+                "passedCount": 0
+              }
+            },
+            {
+              "name": "контраст нельзя округлять перед проверкой",
+              "input": {
+                "elements": [
+                  {
+                    "id": "almost",
+                    "foreground": 0,
+                    "background": 0.174,
+                    "fontSize": 16,
+                    "bold": false
+                  },
+                  {
+                    "id": "enough",
+                    "foreground": 0,
+                    "background": 0.2,
+                    "fontSize": 16,
+                    "bold": false
+                  }
+                ]
+              },
+              "expected": {
+                "failedIds": [
+                  "almost"
+                ],
+                "passedCount": 1
+              }
+            }
+          ]
+        },
+        {
+          "id": "copy-fit",
+          "title": "Кнопка «Начать невероятное путешествие»",
+          "summary": "Редактор принёс прекрасный текст. Кнопка принесла лимит символов.",
+          "description": "maxChars — целое неотрицательное число. labels имеют уникальные id и variants — строки от предпочтительной к запасной. Удали пробелы по краям каждого варианта через trim(), пустые варианты пропусти. Выбери первый непустой вариант длиной <=maxChars. Длину считай в Unicode-кодовых точках: Array.from(text).length. Входные emoji состоят из одной кодовой точки. Если ни один не помещается и maxChars>0, возьми первый непустой вариант, оставь первые maxChars-1 кодовых точек и добавь '…'; truncated=true. Если нет непустых вариантов, верни text='' и truncated=false. Если maxChars=0, text='', а truncated=true только при наличии непустого варианта. Верни {labels:[{id,text,truncated}]} в исходном порядке.",
+          "signature": "function solve(input) -> { labels }",
+          "starterCode": "function solve(input) {\n  return { labels: [] }\n}\n",
+          "publicExampleCount": 2,
+          "tests": [
+            {
+              "name": "короткая запасная надпись спасает кнопку",
+              "input": {
+                "maxChars": 5,
+                "labels": [
+                  {
+                    "id": "start",
+                    "variants": [
+                      "Начать обучение",
+                      " Старт "
+                    ]
+                  }
+                ]
+              },
+              "expected": {
+                "labels": [
+                  {
+                    "id": "start",
+                    "text": "Старт",
+                    "truncated": false
+                  }
+                ]
+              }
+            },
+            {
+              "name": "нет подходящего — ставим многоточие",
+              "input": {
+                "maxChars": 4,
+                "labels": [
+                  {
+                    "id": "go",
+                    "variants": [
+                      "Учиться",
+                      "Запуск"
+                    ]
+                  }
+                ]
+              },
+              "expected": {
+                "labels": [
+                  {
+                    "id": "go",
+                    "text": "Учи…",
+                    "truncated": true
+                  }
+                ]
+              }
+            },
+            {
+              "name": "emoji остаётся целым",
+              "input": {
+                "maxChars": 3,
+                "labels": [
+                  {
+                    "id": "rocket",
+                    "variants": [
+                      "🚀🚀🚀🚀"
+                    ]
+                  }
+                ]
+              },
+              "expected": {
+                "labels": [
+                  {
+                    "id": "rocket",
+                    "text": "🚀🚀…",
+                    "truncated": true
+                  }
+                ]
+              }
+            },
+            {
+              "name": "пустые варианты пропускаем",
+              "input": {
+                "maxChars": 3,
+                "labels": [
+                  {
+                    "id": "blank",
+                    "variants": [
+                      "  ",
+                      ""
+                    ]
+                  },
+                  {
+                    "id": "ok",
+                    "variants": [
+                      " ",
+                      " Да "
+                    ]
+                  }
+                ]
+              },
+              "expected": {
+                "labels": [
+                  {
+                    "id": "blank",
+                    "text": "",
+                    "truncated": false
+                  },
+                  {
+                    "id": "ok",
+                    "text": "Да",
+                    "truncated": false
+                  }
+                ]
+              }
+            },
+            {
+              "name": "нулевой лимит не вставляет многоточие",
+              "input": {
+                "maxChars": 0,
+                "labels": [
+                  {
+                    "id": "a",
+                    "variants": [
+                      "Да"
+                    ]
+                  },
+                  {
+                    "id": "b",
+                    "variants": []
+                  }
+                ]
+              },
+              "expected": {
+                "labels": [
+                  {
+                    "id": "a",
+                    "text": "",
+                    "truncated": true
+                  },
+                  {
+                    "id": "b",
+                    "text": "",
+                    "truncated": false
+                  }
+                ]
+              }
+            },
+            {
+              "name": "один символ вмещает только многоточие",
+              "input": {
+                "maxChars": 1,
+                "labels": [
+                  {
+                    "id": "a",
+                    "variants": [
+                      "Да"
+                    ]
+                  },
+                  {
+                    "id": "b",
+                    "variants": [
+                      "🚀"
+                    ]
+                  }
+                ]
+              },
+              "expected": {
+                "labels": [
+                  {
+                    "id": "a",
+                    "text": "…",
+                    "truncated": true
+                  },
+                  {
+                    "id": "b",
+                    "text": "🚀",
+                    "truncated": false
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "languages": [
+        "javascript"
+      ]
+    },
+    "edium-js-2026-09-v3-ai-ml": {
+      "direction": "AI/ML",
+      "tasks": [
+        {
+          "id": "prompt-suitcase",
+          "title": "Чемодан для промпта",
+          "summary": "Контекстное окно не резиновое. Даже если очень вежливо попросить модель.",
+          "description": "maxTokens и reservedTokens — неотрицательные целые; бюджет блоков равен max(0, maxTokens - reservedTokens). blocks содержат id, положительное целое tokens и целое priority. Из одинаковых id оставь первый блок. Рассматривай блоки по убыванию priority, при равенстве — в исходном порядке. Если блок целиком помещается в оставшийся бюджет, добавь его; иначе пропусти и продолжай. Верни selectedIds в порядке добавления, usedTokens только для выбранных блоков и remainingTokens из бюджета блоков. Текст резать нельзя: кот в половине системного промпта опасен.",
+          "signature": "function solve(input) -> { selectedIds, usedTokens, remainingTokens }",
+          "starterCode": "function solve(input) {\n  return { selectedIds: [], usedTokens: 0, remainingTokens: 0 }\n}\n",
+          "publicExampleCount": 2,
+          "tests": [
+            {
+              "name": "сначала важное, слишком большое пропускаем",
+              "input": {
+                "maxTokens": 10,
+                "reservedTokens": 2,
+                "blocks": [
+                  {
+                    "id": "chat",
+                    "tokens": 4,
+                    "priority": 1
+                  },
+                  {
+                    "id": "policy",
+                    "tokens": 5,
+                    "priority": 3
+                  },
+                  {
+                    "id": "book",
+                    "tokens": 10,
+                    "priority": 2
+                  },
+                  {
+                    "id": "hint",
+                    "tokens": 3,
+                    "priority": 0
+                  }
+                ]
+              },
+              "expected": {
+                "selectedIds": [
+                  "policy",
+                  "hint"
+                ],
+                "usedTokens": 8,
+                "remainingTokens": 0
+              }
+            },
+            {
+              "name": "одинаковый приоритет сохраняет порядок",
+              "input": {
+                "maxTokens": 5,
+                "reservedTokens": 0,
+                "blocks": [
+                  {
+                    "id": "b",
+                    "tokens": 3,
+                    "priority": 1
+                  },
+                  {
+                    "id": "a",
+                    "tokens": 3,
+                    "priority": 1
+                  }
+                ]
+              },
+              "expected": {
+                "selectedIds": [
+                  "b"
+                ],
+                "usedTokens": 3,
+                "remainingTokens": 2
+              }
+            },
+            {
+              "name": "дубль не получает VIP-проход",
+              "input": {
+                "maxTokens": 5,
+                "reservedTokens": 0,
+                "blocks": [
+                  {
+                    "id": "x",
+                    "tokens": 6,
+                    "priority": 0
+                  },
+                  {
+                    "id": "x",
+                    "tokens": 1,
+                    "priority": 99
+                  },
+                  {
+                    "id": "y",
+                    "tokens": 2,
+                    "priority": -1
+                  }
+                ]
+              },
+              "expected": {
+                "selectedIds": [
+                  "y"
+                ],
+                "usedTokens": 2,
+                "remainingTokens": 3
+              }
+            },
+            {
+              "name": "резерв больше окна",
+              "input": {
+                "maxTokens": 4,
+                "reservedTokens": 6,
+                "blocks": [
+                  {
+                    "id": "x",
+                    "tokens": 1,
+                    "priority": 1
+                  }
+                ]
+              },
+              "expected": {
+                "selectedIds": [],
+                "usedTokens": 0,
+                "remainingTokens": 0
+              }
+            },
+            {
+              "name": "пустой чемодан",
+              "input": {
+                "maxTokens": 10,
+                "reservedTokens": 3,
+                "blocks": []
+              },
+              "expected": {
+                "selectedIds": [],
+                "usedTokens": 0,
+                "remainingTokens": 7
+              }
+            },
+            {
+              "name": "ровно в бюджет",
+              "input": {
+                "maxTokens": 10,
+                "reservedTokens": 2,
+                "blocks": [
+                  {
+                    "id": "x",
+                    "tokens": 8,
+                    "priority": -2
+                  }
+                ]
+              },
+              "expected": {
+                "selectedIds": [
+                  "x"
+                ],
+                "usedTokens": 8,
+                "remainingTokens": 0
+              }
+            }
+          ]
+        },
+        {
+          "id": "robot-citation-desk",
+          "title": "Нейросеть, предъявите источник",
+          "summary": "«Я так чувствую» — прекрасное начало стихотворения, но слабая ссылка для ответа ученику.",
+          "description": "claims содержат уникальные id и boolean required. Источник подтверждает утверждение, если claimId совпадает, status='verified', confidence >= minConfidence, а возраст currentDay - day находится от 0 до maxAgeDays включительно. Дни — целые числа, confidence и minConfidence — числа от 0 до 1; sources может содержать несколько источников на claim. Будущие источники не подходят. Верни supportedIds и uncertainIds в порядке claims. action='human_review', если не подтверждено хотя бы одно required-утверждение; иначе 'caution', если есть неподтверждённые; иначе 'answer'. Пустой ответ имеет action='answer'.",
+          "signature": "function solve(input) -> { supportedIds, uncertainIds, action }",
+          "starterCode": "function solve(input) {\n  return { supportedIds: [], uncertainIds: [], action: 'answer' }\n}\n",
+          "publicExampleCount": 2,
+          "tests": [
+            {
+              "name": "необязательная фантазия включает осторожность",
+              "input": {
+                "currentDay": 10,
+                "maxAgeDays": 3,
+                "minConfidence": 0.8,
+                "claims": [
+                  {
+                    "id": "fact",
+                    "required": true
+                  },
+                  {
+                    "id": "joke",
+                    "required": false
+                  }
+                ],
+                "sources": [
+                  {
+                    "claimId": "fact",
+                    "status": "verified",
+                    "confidence": 0.9,
+                    "day": 9
+                  }
+                ]
+              },
+              "expected": {
+                "supportedIds": [
+                  "fact"
+                ],
+                "uncertainIds": [
+                  "joke"
+                ],
+                "action": "caution"
+              }
+            },
+            {
+              "name": "старый и будущий источники не годятся",
+              "input": {
+                "currentDay": 10,
+                "maxAgeDays": 3,
+                "minConfidence": 0.8,
+                "claims": [
+                  {
+                    "id": "fact",
+                    "required": true
+                  }
+                ],
+                "sources": [
+                  {
+                    "claimId": "fact",
+                    "status": "verified",
+                    "confidence": 1,
+                    "day": 6
+                  },
+                  {
+                    "claimId": "fact",
+                    "status": "verified",
+                    "confidence": 1,
+                    "day": 11
+                  }
+                ]
+              },
+              "expected": {
+                "supportedIds": [],
+                "uncertainIds": [
+                  "fact"
+                ],
+                "action": "human_review"
+              }
+            },
+            {
+              "name": "границы доверия и возраста включительны",
+              "input": {
+                "currentDay": 10,
+                "maxAgeDays": 3,
+                "minConfidence": 0.8,
+                "claims": [
+                  {
+                    "id": "a",
+                    "required": true
+                  }
+                ],
+                "sources": [
+                  {
+                    "claimId": "a",
+                    "status": "verified",
+                    "confidence": 0.8,
+                    "day": 7
+                  }
+                ]
+              },
+              "expected": {
+                "supportedIds": [
+                  "a"
+                ],
+                "uncertainIds": [],
+                "action": "answer"
+              }
+            },
+            {
+              "name": "черновик не становится источником от уверенности",
+              "input": {
+                "currentDay": 5,
+                "maxAgeDays": 0,
+                "minConfidence": 0.5,
+                "claims": [
+                  {
+                    "id": "a",
+                    "required": true
+                  }
+                ],
+                "sources": [
+                  {
+                    "claimId": "a",
+                    "status": "draft",
+                    "confidence": 1,
+                    "day": 5
+                  },
+                  {
+                    "claimId": "a",
+                    "status": "verified",
+                    "confidence": 0.49,
+                    "day": 5
+                  }
+                ]
+              },
+              "expected": {
+                "supportedIds": [],
+                "uncertainIds": [
+                  "a"
+                ],
+                "action": "human_review"
+              }
+            },
+            {
+              "name": "достаточно одного годного источника",
+              "input": {
+                "currentDay": 1,
+                "maxAgeDays": 1,
+                "minConfidence": 0.5,
+                "claims": [
+                  {
+                    "id": "b",
+                    "required": false
+                  },
+                  {
+                    "id": "a",
+                    "required": true
+                  }
+                ],
+                "sources": [
+                  {
+                    "claimId": "a",
+                    "status": "verified",
+                    "confidence": 1,
+                    "day": 1
+                  },
+                  {
+                    "claimId": "b",
+                    "status": "draft",
+                    "confidence": 1,
+                    "day": 1
+                  },
+                  {
+                    "claimId": "b",
+                    "status": "verified",
+                    "confidence": 0.5,
+                    "day": 0
+                  }
+                ]
+              },
+              "expected": {
+                "supportedIds": [
+                  "b",
+                  "a"
+                ],
+                "uncertainIds": [],
+                "action": "answer"
+              }
+            },
+            {
+              "name": "молчание без галлюцинаций",
+              "input": {
+                "currentDay": 1,
+                "maxAgeDays": 1,
+                "minConfidence": 1,
+                "claims": [],
+                "sources": []
+              },
+              "expected": {
+                "supportedIds": [],
+                "uncertainIds": [],
+                "action": "answer"
+              }
+            }
+          ]
+        },
+        {
+          "id": "model-routing-cafe",
+          "title": "Кофейня моделей",
+          "summary": "Для краткого пересказа не обязательно будить самую дорогую модель в серверной.",
+          "description": "Выбери модель для запроса. models имеют уникальные id, boolean local и tools, целые contextWindow, cost и quality. Модель подходит, если contextWindow >= tokens, cost <= maxCost, при localOnly=true она local, а при needsTools=true поддерживает tools. Среди подходящих выбери максимальный quality, затем минимальный cost, затем меньший id по стандартному порядку JS строк (id состоят из латиницы, цифр и дефиса). Верни {modelId: id, cost}; если подходящих нет — {modelId: null, cost: 0}. Все числовые поля неотрицательны.",
+          "signature": "function solve(input) -> { modelId, cost }",
+          "starterCode": "function solve(input) {\n  return { modelId: null, cost: 0 }\n}\n",
+          "publicExampleCount": 2,
+          "tests": [
+            {
+              "name": "качество побеждает дешевизну в рамках бюджета",
+              "input": {
+                "tokens": 100,
+                "maxCost": 10,
+                "localOnly": false,
+                "needsTools": false,
+                "models": [
+                  {
+                    "id": "small",
+                    "local": true,
+                    "tools": false,
+                    "contextWindow": 100,
+                    "cost": 2,
+                    "quality": 5
+                  },
+                  {
+                    "id": "large",
+                    "local": false,
+                    "tools": true,
+                    "contextWindow": 200,
+                    "cost": 10,
+                    "quality": 9
+                  }
+                ]
+              },
+              "expected": {
+                "modelId": "large",
+                "cost": 10
+              }
+            },
+            {
+              "name": "приватный запрос остаётся локально",
+              "input": {
+                "tokens": 10,
+                "maxCost": 100,
+                "localOnly": true,
+                "needsTools": false,
+                "models": [
+                  {
+                    "id": "cloud",
+                    "local": false,
+                    "tools": true,
+                    "contextWindow": 100,
+                    "cost": 1,
+                    "quality": 99
+                  },
+                  {
+                    "id": "home",
+                    "local": true,
+                    "tools": false,
+                    "contextWindow": 10,
+                    "cost": 2,
+                    "quality": 5
+                  }
+                ]
+              },
+              "expected": {
+                "modelId": "home",
+                "cost": 2
+              }
+            },
+            {
+              "name": "без инструментов запрос с инструментами не выполнить",
+              "input": {
+                "tokens": 5,
+                "maxCost": 5,
+                "localOnly": false,
+                "needsTools": true,
+                "models": [
+                  {
+                    "id": "talker",
+                    "local": true,
+                    "tools": false,
+                    "contextWindow": 10,
+                    "cost": 1,
+                    "quality": 10
+                  }
+                ]
+              },
+              "expected": {
+                "modelId": null,
+                "cost": 0
+              }
+            },
+            {
+              "name": "при равном качестве дешевле",
+              "input": {
+                "tokens": 10,
+                "maxCost": 5,
+                "localOnly": false,
+                "needsTools": false,
+                "models": [
+                  {
+                    "id": "a",
+                    "local": true,
+                    "tools": false,
+                    "contextWindow": 10,
+                    "cost": 5,
+                    "quality": 10
+                  },
+                  {
+                    "id": "z",
+                    "local": true,
+                    "tools": false,
+                    "contextWindow": 10,
+                    "cost": 3,
+                    "quality": 10
+                  }
+                ]
+              },
+              "expected": {
+                "modelId": "z",
+                "cost": 3
+              }
+            },
+            {
+              "name": "полная ничья разрешается по id",
+              "input": {
+                "tokens": 0,
+                "maxCost": 0,
+                "localOnly": false,
+                "needsTools": false,
+                "models": [
+                  {
+                    "id": "z",
+                    "local": true,
+                    "tools": true,
+                    "contextWindow": 0,
+                    "cost": 0,
+                    "quality": 0
+                  },
+                  {
+                    "id": "a",
+                    "local": true,
+                    "tools": true,
+                    "contextWindow": 0,
+                    "cost": 0,
+                    "quality": 0
+                  }
+                ]
+              },
+              "expected": {
+                "modelId": "a",
+                "cost": 0
+              }
+            },
+            {
+              "name": "контекст и бюджет проверяются отдельно",
+              "input": {
+                "tokens": 10,
+                "maxCost": 5,
+                "localOnly": false,
+                "needsTools": false,
+                "models": [
+                  {
+                    "id": "short",
+                    "local": true,
+                    "tools": true,
+                    "contextWindow": 9,
+                    "cost": 1,
+                    "quality": 10
+                  },
+                  {
+                    "id": "expensive",
+                    "local": true,
+                    "tools": true,
+                    "contextWindow": 10,
+                    "cost": 6,
+                    "quality": 10
+                  }
+                ]
+              },
+              "expected": {
+                "modelId": null,
+                "cost": 0
+              }
+            },
+            {
+              "name": "модели ушли на обед",
+              "input": {
+                "tokens": 1,
+                "maxCost": 1,
+                "localOnly": false,
+                "needsTools": false,
+                "models": []
+              },
+              "expected": {
+                "modelId": null,
+                "cost": 0
+              }
+            }
+          ]
+        }
+      ],
+      "languages": [
+        "javascript"
+      ]
+    },
     "edium-js-2026-09-v1": {
       "direction": "Общий",
       "tasks": [

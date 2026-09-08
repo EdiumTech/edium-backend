@@ -1,5 +1,96 @@
 // Test-only reference implementations. Never copy into the runner image.
 const referenceSolutions = {
+  "boost-button-cat": function solve(input) {
+    let step = input.initialStep
+    const lastAccepted = new Map(), acceptedIds = [], ignoredIds = []
+    for (const event of input.events) {
+      if (lastAccepted.has(event.button) && event.at - lastAccepted.get(event.button) < input.debounceMs) {
+        ignoredIds.push(event.id)
+        continue
+      }
+      lastAccepted.set(event.button, event.at)
+      acceptedIds.push(event.id)
+      if (event.button === 'home') step = 0
+      else if (event.action === 'hold') step = event.button === 'next' ? input.stepCount - 1 : 0
+      else step = Math.max(0, Math.min(input.stepCount - 1, step + (event.button === 'next' ? 1 : -1)))
+    }
+    return { step, acceptedIds, ignoredIds }
+  },
+  "boost-lamp-queue": function solve(input) {
+    const devices = new Set(input.devices.map(device => device.id)), seen = new Set(), latest = new Map()
+    for (const command of input.commands) {
+      if (seen.has(command.commandId)) continue
+      seen.add(command.commandId)
+      if (!devices.has(command.deviceId)) continue
+      const prior = latest.get(command.deviceId)
+      if (!prior || command.revision >= prior.revision) latest.set(command.deviceId, command)
+    }
+    const result = { send: [], waitingIds: [], abandonedIds: [], acknowledgedIds: [] }
+    for (const device of input.devices) {
+      const command = latest.get(device.id)
+      if (!command) continue
+      if (command.acked) result.acknowledgedIds.push(command.commandId)
+      else if (command.attempts >= input.maxAttempts) result.abandonedIds.push(command.commandId)
+      else if (!device.online) result.waitingIds.push(command.commandId)
+      else result.send.push({ commandId: command.commandId, deviceId: device.id, action: command.action, attempt: command.attempts + 1 })
+    }
+    return result
+  },
+  "boost-weather-card": function solve(input) {
+    const cards = new Map(input.cards.map(card => [card.id, { ...card, error: false }]))
+    for (const event of input.events) {
+      const card = cards.get(event.cardId)
+      if (!card || event.at > input.now || event.revision <= card.revision) continue
+      card.revision = event.revision
+      card.error = !event.ok
+      if (event.ok) { card.value = event.value; card.updatedAt = event.at }
+    }
+    let alert = null
+    for (const next of input.alerts) {
+      if (next.startsAt <= input.now && input.now < next.endsAt && (!alert || next.priority > alert.priority)) alert = next
+    }
+    return {
+      cards: [...cards.values()].map(card => ({ id: card.id, value: card.value, revision: card.revision, stale: input.now - card.updatedAt >= input.ttl, error: card.error })),
+      visible: alert ? { kind: 'alert', id: alert.id, text: alert.text } : { kind: 'card', id: input.selectedId },
+    }
+  },
+  "mobile-outbox-cat": function solve(input) {
+    const seen = new Set(), byEntity = new Map(), duplicateIds = []
+    for (const operation of input.operations) {
+      if (seen.has(operation.id)) { duplicateIds.push(operation.id); continue }
+      seen.add(operation.id)
+      const prior = byEntity.get(operation.entityId)
+      if (!prior || operation.revision >= prior.revision) byEntity.set(operation.entityId, operation)
+    }
+    const items = [], deletedIds = []
+    for (const id of [...byEntity.keys()].sort()) {
+      const operation = byEntity.get(id)
+      if (operation.kind === 'delete') deletedIds.push(id)
+      else items.push({ id, value: operation.value, revision: operation.revision })
+    }
+    return { items, deletedIds, duplicateIds }
+  },
+  "mobile-permission-panda": function solve(input) {
+    const seen = new Set(), result = { readyIds: [], settingsIds: [], deferredIds: [], rationaleIds: [], promptIds: [], ignoredIds: [] }
+    for (const request of input.requests) {
+      if (seen.has(request.permission)) { result.ignoredIds.push(request.id); continue }
+      seen.add(request.permission)
+      const state = input.grants[request.permission] || 'unknown'
+      const key = state === 'granted' ? 'readyIds' : state === 'blocked' ? 'settingsIds' : !input.foreground ? 'deferredIds' : state === 'denied' && !request.explained ? 'rationaleIds' : 'promptIds'
+      result[key].push(request.id)
+    }
+    return result
+  },
+  "mobile-download-lunch": function solve(input) {
+    let remainingBytes = input.storageBytes
+    const selectedIds = [], skipped = []
+    for (const job of [...input.jobs].sort((a, b) => b.priority - a.priority)) {
+      const reason = !input.onWifi && !job.allowCellular ? 'wifi' : input.batteryPercent < input.minBatteryPercent && !job.essential ? 'battery' : job.bytes > remainingBytes ? 'storage' : null
+      if (reason) skipped.push({ id: job.id, reason })
+      else { selectedIds.push(job.id); remainingBytes -= job.bytes }
+    }
+    return { selectedIds, skipped, remainingBytes }
+  },
   "notification-bouncer": function solve(input){const r={deliveredIds:[],mutedIds:[],duplicateIds:[]},seen=new Set();const {start,end}=input.quiet;const quiet=start!==end&&(start<end?input.nowMinute>=start&&input.nowMinute<end:input.nowMinute>=start||input.nowMinute<end);for(const n of input.notifications){if(seen.has(n.id)){r.duplicateIds.push(n.id);continue}seen.add(n.id);r[input.enabledChannels.includes(n.channel)&&(!quiet||n.urgent===true)?"deliveredIds":"mutedIds"].push(n.id)}return r},
   "cart-without-drama": function solve(input){const subtotal=input.items.reduce((s,x)=>s+x.price*x.quantity,0);let discount=0,couponId=null;for(const c of input.coupons){const d=Math.min(subtotal,c.kind==="fixed"?c.value:Math.floor(subtotal*c.value/100));if(d>discount){discount=d;couponId=c.id}}const shipping=subtotal>0&&subtotal-discount<input.freeDeliveryFrom?input.deliveryFee:0;return{subtotal,discount,couponId,shipping,total:subtotal-discount+shipping}},
   "feature-flag-tea": function solve(input){const values={...input.defaults},priorities={};for(const r of input.overrides){if(!Object.hasOwn(values,r.flag)||!(r.audience==="*"||input.groups.includes(r.audience)))continue;if(!Object.hasOwn(priorities,r.flag)||r.priority>=priorities[r.flag]){values[r.flag]=r.value;priorities[r.flag]=r.priority}}return{values,enabled:Object.keys(values).filter(k=>values[k]).sort()}},

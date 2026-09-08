@@ -5,6 +5,7 @@ const MEMORY_LIMIT = 64 * 1024 * 1024
 const STACK_LIMIT = 512 * 1024
 const TEST_TIMEOUT_MS = 750
 const MAX_SOURCE_BYTES = 65536
+const MAX_COMPILED_BYTES = 4 * 1024 * 1024
 const MAX_RESULT_BYTES = 262144
 
 function stable(value) {
@@ -73,10 +74,10 @@ async function executeTest(QuickJS, source, test) {
   }
 }
 
-async function runTask(taskId, source, taskSetVersion = LEGACY_TASK_SET_VERSION) {
+async function evaluateSuite(taskId, source, taskSetVersion, maxBytes) {
   const suite = getTaskSuite(taskSetVersion, taskId)
   if (!Array.isArray(suite) || !suite.length) throw new Error('unknown_task')
-  if (typeof source !== 'string' || Buffer.byteLength(source, 'utf8') > MAX_SOURCE_BYTES) throw new Error('invalid_source')
+  if (typeof source !== 'string' || Buffer.byteLength(source, 'utf8') > maxBytes) throw new Error('invalid_source')
   const started = Date.now()
   // A separate Wasm module per request keeps linear memory isolated across candidates.
   const QuickJS = await newQuickJSWASMModule()
@@ -93,4 +94,13 @@ async function runTask(taskId, source, taskSetVersion = LEGACY_TASK_SET_VERSION)
   return { passed, total: suite.length, allPassed: passed === suite.length, tests, durationMs: Date.now() - started }
 }
 
-module.exports = { runTask }
+function runTask(taskId, source, taskSetVersion = LEGACY_TASK_SET_VERSION) {
+  return evaluateSuite(taskId, source, taskSetVersion, MAX_SOURCE_BYTES)
+}
+
+// Only the trusted Kotlin compiler adapter calls this. HTTP source limits stay 64 KiB.
+function runCompiledTask(taskId, source, taskSetVersion) {
+  return evaluateSuite(taskId, source, taskSetVersion, MAX_COMPILED_BYTES)
+}
+
+module.exports = { runTask, runCompiledTask, equals, safeMessage }
