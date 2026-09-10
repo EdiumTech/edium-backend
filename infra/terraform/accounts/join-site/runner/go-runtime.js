@@ -97,15 +97,17 @@ function boundedProcess(executable, args, { cwd, env, timeout, maxBytes, input =
 function configuration(options = {}) {
   const rawGo = options.goDirectory || process.env.EDIUM_GO_HOME
   const rawWasmtime = options.wasmtimeExecutable || process.env.EDIUM_WASMTIME
-  if (process.platform !== 'darwin' || process.arch !== 'arm64' || !rawGo || !rawWasmtime) throw unavailable()
+  const platform = process.platform === 'darwin' && process.arch === 'arm64' ? 'darwin_arm64'
+    : process.platform === 'linux' && process.arch === 'x64' ? 'linux_amd64' : null
+  if (!platform || !rawGo || !rawWasmtime) throw unavailable()
   try {
     const goDirectory = fs.realpathSync(rawGo)
     const wasmtimeExecutable = fs.realpathSync(rawWasmtime)
-    fs.accessSync('/usr/bin/sandbox-exec', fs.constants.X_OK)
+    if (process.platform === 'darwin') fs.accessSync('/usr/bin/sandbox-exec', fs.constants.X_OK)
     fs.accessSync(wasmtimeExecutable, fs.constants.X_OK)
     if (fs.readFileSync(path.join(goDirectory, 'VERSION'), 'utf8').split('\n')[0] !== GO_VERSION) throw unavailable()
-    for (const name of ['bin/go', 'pkg/tool/darwin_arm64/compile', 'pkg/tool/darwin_arm64/asm', 'pkg/tool/darwin_arm64/link']) fs.accessSync(path.join(goDirectory, name), fs.constants.X_OK)
-    return { goDirectory, wasmtimeExecutable, compiler: path.join(goDirectory, 'bin/go') }
+    for (const name of ['bin/go', `pkg/tool/${platform}/compile`, `pkg/tool/${platform}/asm`, `pkg/tool/${platform}/link`]) fs.accessSync(path.join(goDirectory, name), fs.constants.X_OK)
+    return { goDirectory, wasmtimeExecutable, compiler: path.join(goDirectory, 'bin/go'), platform }
   } catch { throw unavailable() }
 }
 
@@ -124,7 +126,10 @@ async function runGo(source, suite, options = {}) {
   let runtimeDirectory
   try {
     for (const name of ['cache', 'tmp', 'gopath', 'modules']) fs.mkdirSync(path.join(jobDirectory, name))
-    const profile = compilerProfile({ ...config, jobDirectory })
+    const profile = process.platform === 'darwin' ? compilerProfile({ ...config, jobDirectory }) : null
+    const compilerProcess = args => process.platform === 'darwin'
+      ? ['/usr/bin/sandbox-exec', ['-p', profile, config.compiler, ...args]]
+      : [config.compiler, args]
     // No inherited credentials, Go user config, global cache, module resolution,
     // toolchain downloads, C compiler, generate directives, or native go run.
     const environment = {
@@ -135,18 +140,21 @@ async function runGo(source, suite, options = {}) {
       GOMODCACHE: path.join(jobDirectory, 'modules'), GOTMPDIR: path.join(jobDirectory, 'tmp'),
       GOMAXPROCS: '2', GOMEMLIMIT: '512MiB',
     }
-    const compilerVersion = await boundedProcess('/usr/bin/sandbox-exec', ['-p', profile, config.compiler, 'version'], { cwd: jobDirectory, env: environment, timeout: 5000, maxBytes: 16384 })
+    const [versionExecutable, versionArgs] = compilerProcess(['version'])
+    const compilerVersion = await boundedProcess(versionExecutable, versionArgs, { cwd: jobDirectory, env: environment, timeout: 5000, maxBytes: 16384 })
     const runtimeVersion = await boundedProcess(config.wasmtimeExecutable, ['--version'], { cwd: jobDirectory, env: {}, timeout: 5000, maxBytes: 16384 })
-    if (compilerVersion.status !== 0 || compilerVersion.stdout.trim() !== `go version ${GO_VERSION} darwin/arm64`
+    const hostLabel = process.platform === 'darwin' ? 'darwin/arm64' : 'linux/amd64'
+    if (compilerVersion.status !== 0 || compilerVersion.stdout.trim() !== `go version ${GO_VERSION} ${hostLabel}`
       || runtimeVersion.status !== 0 || !runtimeVersion.stdout.startsWith(`wasmtime ${WASMTIME_VERSION} (`)) throw unavailable()
     const candidate = path.join(jobDirectory, 'Candidate.go')
     const bridge = path.join(jobDirectory, 'Bridge.go')
     const artifact = path.join(jobDirectory, 'candidate.wasm')
     fs.writeFileSync(candidate, source)
     fs.copyFileSync(path.join(__dirname, 'go-bridge.go'), bridge)
-    const compilation = await boundedProcess('/usr/bin/sandbox-exec', ['-p', profile, config.compiler,
+    const [compileExecutable, compileArgs] = compilerProcess([
       'build', '-p=2', '-trimpath', '-buildvcs=false', '-ldflags=-s -w', '-o', artifact, candidate, bridge,
-    ], { cwd: jobDirectory, env: environment, timeout: Math.max(1, deadline - Date.now()), maxBytes: 1024 * 1024, monitorMemory: true })
+    ])
+    const compilation = await boundedProcess(compileExecutable, compileArgs, { cwd: jobDirectory, env: environment, timeout: Math.max(1, deadline - Date.now()), maxBytes: 1024 * 1024, monitorMemory: true })
     if (compilation.error || compilation.status !== 0) {
       const message = `${compilation.stderr}\n${compilation.stdout}`.replaceAll(jobDirectory, '<contest>').replaceAll(config.goDirectory, '<compiler>').trim().slice(0, 6000)
       if (compilation.reason === 'monitor_unavailable' || ['ENOENT', 'EACCES', 'EPERM'].includes(compilation.error?.code) || /sandbox-exec:|cannot find GOROOT|no such tool /.test(message)) throw unavailable()

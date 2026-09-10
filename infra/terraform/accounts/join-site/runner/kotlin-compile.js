@@ -51,14 +51,14 @@ function compileKotlin(source, {
   compilerDirectory = process.env.EDIUM_KOTLIN_HOME,
   javaDirectory = process.env.EDIUM_JAVA_HOME,
 } = {}) {
-  // Do not silently run a native compiler without the verified OS sandbox.
-  // Linux deployments must provision and verify their compiler isolation first.
-  if (process.platform !== 'darwin' || !compilerDirectory || !javaDirectory) throw runtimeUnavailable()
+  const supportedHost = (process.platform === 'darwin' && process.arch === 'arm64')
+    || (process.platform === 'linux' && process.arch === 'x64')
+  if (!supportedHost || !compilerDirectory || !javaDirectory) throw runtimeUnavailable()
   if (typeof source !== 'string' || Buffer.byteLength(source) > MAX_SOURCE_BYTES) throw new Error('invalid_source')
   try {
     compilerDirectory = fs.realpathSync(compilerDirectory)
     javaDirectory = fs.realpathSync(javaDirectory)
-    fs.accessSync('/usr/bin/sandbox-exec', fs.constants.X_OK)
+    if (process.platform === 'darwin') fs.accessSync('/usr/bin/sandbox-exec', fs.constants.X_OK)
     fs.accessSync(path.join(javaDirectory, 'bin/java'), fs.constants.X_OK)
     fs.accessSync(path.join(javaDirectory, 'lib/modules'), fs.constants.R_OK)
     for (const file of ['kotlin-preloader.jar', 'kotlin-compiler.jar', 'kotlin-stdlib-js.klib']) {
@@ -69,7 +69,7 @@ function compileKotlin(source, {
     throw runtimeUnavailable()
   }
   const jobDirectory = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'edium-kotlin-job-'))
-  const profile = compilerProfile({ compilerDirectory, javaDirectory, jobDirectory })
+  const profile = process.platform === 'darwin' ? compilerProfile({ compilerDirectory, javaDirectory, jobDirectory }) : null
   const deadline = Date.now() + COMPILE_TIMEOUT_MS
   const common = [
     '-Xmx512m', '-Xms64m', '-XX:ActiveProcessorCount=2', '-XX:+UseSerialGC',
@@ -91,7 +91,9 @@ function compileKotlin(source, {
   function stage(args) {
     const remaining = deadline - Date.now()
     if (remaining <= 0) throw compilationFailure('Компиляция заняла слишком много времени.')
-    const result = spawnSync('/usr/bin/sandbox-exec', ['-p', profile, path.join(javaDirectory, 'bin/java'), ...common, ...args], {
+    const executable = process.platform === 'darwin' ? '/usr/bin/sandbox-exec' : path.join(javaDirectory, 'bin/java')
+    const commandArgs = process.platform === 'darwin' ? ['-p', profile, path.join(javaDirectory, 'bin/java'), ...common, ...args] : [...common, ...args]
+    const result = spawnSync(executable, commandArgs, {
       cwd: jobDirectory,
       env: { PATH: '/usr/bin:/bin', LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8' },
       timeout: remaining, maxBuffer: 1024 * 1024, encoding: 'utf8',

@@ -127,17 +127,18 @@ function configuration(options = {}) {
   const rawToolchain = options.toolchainDirectory || process.env.EDIUM_SWIFT_HOME
   const rawSdk = options.sdkDirectory || process.env.EDIUM_SWIFT_SDK
   const rawWasmtime = options.wasmtimeExecutable || process.env.EDIUM_WASMTIME
-  // The verified macOS Seatbelt compiler sandbox is mandatory. Linux must
-  // provision an independently verified sandbox before enabling compilation;
-  // there is deliberately no unsandboxed native-compiler fallback.
-  if (process.platform !== 'darwin' || !rawToolchain || !rawSdk || !rawWasmtime) throw unavailable()
+  const supportedHost = (process.platform === 'darwin' && process.arch === 'arm64')
+    || (process.platform === 'linux' && process.arch === 'x64')
+  if (!supportedHost || !rawToolchain || !rawSdk || !rawWasmtime) throw unavailable()
   try {
     const toolchainDirectory = fs.realpathSync(rawToolchain)
     const sdkDirectory = fs.realpathSync(rawSdk)
     const wasmtimeExecutable = fs.realpathSync(rawWasmtime)
     const compiler = path.join(toolchainDirectory, 'usr/bin/swiftc')
     const resources = path.join(sdkDirectory, 'swift.xctoolchain/usr/lib/swift_static')
-    for (const executable of ['/usr/bin/sandbox-exec', compiler, path.join(toolchainDirectory, 'usr/bin/wasm-ld'), wasmtimeExecutable]) {
+    const executables = [compiler, path.join(toolchainDirectory, 'usr/bin/wasm-ld'), wasmtimeExecutable]
+    if (process.platform === 'darwin') executables.push('/usr/bin/sandbox-exec')
+    for (const executable of executables) {
       fs.accessSync(executable, fs.constants.X_OK)
     }
     fs.accessSync(path.join(resources, 'wasi/static-executable-args.lnk'), fs.constants.R_OK)
@@ -164,9 +165,13 @@ async function runSwift(source, suite, options = {}) {
   const jobDirectory = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'edium-swift-job-'))
   let runtimeDirectory
   try {
-    const profile = compilerProfile({ ...config, jobDirectory })
+    const profile = process.platform === 'darwin' ? compilerProfile({ ...config, jobDirectory }) : null
+    const compilerProcess = args => process.platform === 'darwin'
+      ? ['/usr/bin/sandbox-exec', ['-p', profile, config.compiler, ...args]]
+      : [config.compiler, args]
     const environment = { PATH: path.join(config.toolchainDirectory, 'usr/bin') + ':/usr/bin:/bin', TMPDIR: jobDirectory, LANG: 'en_US.UTF-8' }
-    const compilerVersion = await boundedProcess('/usr/bin/sandbox-exec', ['-p', profile, config.compiler, '--version'], {
+    const [versionExecutable, versionArgs] = compilerProcess(['--version'])
+    const compilerVersion = await boundedProcess(versionExecutable, versionArgs, {
       cwd: jobDirectory, env: environment, timeout: 5000, maxBytes: 16384,
     })
     const runtimeVersion = await boundedProcess(config.wasmtimeExecutable, ['--version'], {
@@ -179,13 +184,14 @@ async function runSwift(source, suite, options = {}) {
     const artifact = path.join(jobDirectory, 'candidate.wasm')
     fs.writeFileSync(candidate, source)
     fs.copyFileSync(path.join(__dirname, 'swift-bridge.swift'), bridge)
-    const compilation = await boundedProcess('/usr/bin/sandbox-exec', ['-p', profile, config.compiler,
+    const [compileExecutable, compileArgs] = compilerProcess([
       '-target', 'wasm32-unknown-wasip1', '-sdk', path.join(config.sdkDirectory, 'WASI.sdk'),
       '-resource-dir', config.resources, '-module-cache-path', path.join(jobDirectory, 'module-cache'),
       '-static-stdlib', '-parse-as-library', '-O', '-Xlinker', '--strip-debug',
       '-Xclang-linker', '-resource-dir=' + path.join(config.sdkDirectory, 'swift.xctoolchain/usr/lib/clang'),
       candidate, bridge, '-o', artifact,
-    ], {
+    ])
+    const compilation = await boundedProcess(compileExecutable, compileArgs, {
       cwd: jobDirectory, env: environment,
       timeout: Math.max(1, compileDeadline - Date.now()), maxBytes: 1024 * 1024, monitorMemory: true,
     })

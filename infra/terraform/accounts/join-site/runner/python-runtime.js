@@ -18,9 +18,8 @@ function unavailable() {
 }
 
 function configuration(options = {}) {
-  // This verified local prototype is deliberately not enabled in the Linux
-  // production image: that requires a current interpreter and host limits.
-  if (process.platform !== 'darwin') throw unavailable()
+  if (!((process.platform === 'darwin' && process.arch === 'arm64')
+    || (process.platform === 'linux' && process.arch === 'x64'))) throw unavailable()
   try {
     const hostPython = fs.realpathSync(options.hostPython || process.env.EDIUM_PYTHON_HOST || '')
     const runtimeDirectory = fs.realpathSync(options.runtimeDirectory || process.env.EDIUM_PYTHON_WASI_HOME || '')

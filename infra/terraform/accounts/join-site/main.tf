@@ -102,7 +102,7 @@ resource "yandex_function" "api" {
   runtime            = "python312"
   entrypoint         = "handler.api"
   memory             = 512
-  execution_timeout  = 30
+  execution_timeout  = 125
   service_account_id = yandex_iam_service_account.runtime.id
   user_hash          = data.archive_file.function.output_base64sha256
   environment = {
@@ -116,6 +116,7 @@ resource "yandex_function" "api" {
     CONTEST_TOKEN_KEY = random_password.contest_token_key.result
     CONTEST_URL       = var.contest_url
     RUNNER_URL        = try(yandex_serverless_container.runner[0].url, "")
+    RUNNER_LANGUAGES  = var.runner_image_url == "" ? "javascript" : "javascript,kotlin,swift,python,go"
   }
   content { zip_filename = data.archive_file.function.output_path }
   log_options { min_level = "ERROR" }
@@ -168,10 +169,10 @@ resource "yandex_serverless_container" "runner" {
   name               = "edium-join-runner"
   description        = "Private QuickJS/Wasm sandbox for the candidate contest"
   folder_id          = var.folder_id
-  memory             = 512
-  cores              = 1
+  memory             = 6144
+  cores              = 3
   core_fraction      = 100
-  execution_timeout  = "10s"
+  execution_timeout  = "120s"
   concurrency        = 1
   service_account_id = yandex_iam_service_account.runner[0].id
   image {

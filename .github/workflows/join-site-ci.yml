@@ -58,3 +58,19 @@ jobs:
 
       - name: Terraform validation
         run: terraform init -backend=false -input=false && terraform fmt -check -recursive && terraform validate
+
+  production-runner:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build production runner image
+        run: docker build --pull --file infra/terraform/accounts/join-site/runner/Dockerfile --tag edium-join-runner:ci infra/terraform/accounts/join-site
+      - name: Run every native reference suite in the image
+        run: |
+          docker run --rm \
+            --network none \
+            --memory 6g \
+            --cpus 3 \
+            --volume "$GITHUB_WORKSPACE/infra/terraform/accounts/join-site/runner:/checks:ro" \
+            --entrypoint node \
+            edium-join-runner:ci /checks/container-runtime-smoke.js

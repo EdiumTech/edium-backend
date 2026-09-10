@@ -35,6 +35,13 @@ jobs:
           set -euo pipefail
           IMAGE="cr.yandex/${REGISTRY_ID}/edium-join-runner:${GITHUB_SHA}"
           docker build --pull --file infra/terraform/accounts/join-site/runner/Dockerfile --tag "$IMAGE" infra/terraform/accounts/join-site
+          docker run --rm \
+            --network none \
+            --memory 6g \
+            --cpus 3 \
+            --volume "$GITHUB_WORKSPACE/infra/terraform/accounts/join-site/runner:/checks:ro" \
+            --entrypoint node \
+            "$IMAGE" /checks/container-runtime-smoke.js
           docker push "$IMAGE"
           DIGEST="$(docker buildx imagetools inspect "$IMAGE" --format '{{json .Manifest.Digest}}' | tr -d '"')"
           test "${DIGEST#sha256:}" != "$DIGEST"
