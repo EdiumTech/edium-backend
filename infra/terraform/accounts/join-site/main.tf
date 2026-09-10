@@ -39,13 +39,6 @@ resource "yandex_iam_service_account" "runner" {
   folder_id   = var.folder_id
 }
 
-resource "yandex_resourcemanager_folder_iam_member" "runner_image_pull" {
-  count     = var.runner_image_url == "" ? 0 : 1
-  folder_id = var.folder_id
-  role      = "container-registry.images.puller"
-  member    = "serviceAccount:${yandex_iam_service_account.runner[0].id}"
-}
-
 resource "yandex_iam_service_account_static_access_key" "storage" {
   service_account_id = yandex_iam_service_account.runtime.id
   description        = "Used only by the join functions for signed resume upload/download URLs"
@@ -120,7 +113,6 @@ resource "yandex_function" "api" {
   }
   content { zip_filename = data.archive_file.function.output_path }
   log_options { min_level = "ERROR" }
-  tags       = ["$latest"]
   labels     = local.tags
   depends_on = [yandex_storage_bucket_iam_binding.runtime_editor]
 }
@@ -153,7 +145,6 @@ resource "yandex_function" "maintenance" {
   }
   content { zip_filename = data.archive_file.function.output_path }
   log_options { min_level = "ERROR" }
-  tags       = ["$latest"]
   labels     = local.tags
   depends_on = [yandex_storage_bucket_iam_binding.runtime_editor]
   lifecycle {
@@ -179,8 +170,7 @@ resource "yandex_serverless_container" "runner" {
     url = var.runner_image_url
   }
   log_options { min_level = "ERROR" }
-  labels     = local.tags
-  depends_on = [yandex_resourcemanager_folder_iam_member.runner_image_pull]
+  labels = local.tags
 }
 
 resource "yandex_serverless_container_iam_binding" "runner_invoker" {
