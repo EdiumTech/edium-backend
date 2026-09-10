@@ -14,7 +14,7 @@ paths:
   /v1/uploads:
     post:
       operationId: createUpload
-      x-yc-apigateway-integration: &function
+      x-yc-apigateway-integration:
         type: cloud_functions
         function_id: ${function_id}
         service_account_id: ${service_account_id}
@@ -23,25 +23,37 @@ paths:
   /v1/applications:
     post:
       operationId: createApplication
-      x-yc-apigateway-integration: *function
+      x-yc-apigateway-integration:
+        type: cloud_functions
+        function_id: ${function_id}
+        service_account_id: ${service_account_id}
       responses:
         '201': { description: Application saved }
   /v1/contest:
     get:
       operationId: getContest
-      x-yc-apigateway-integration: *function
+      x-yc-apigateway-integration:
+        type: cloud_functions
+        function_id: ${function_id}
+        service_account_id: ${service_account_id}
       responses:
         '200': { description: Authorized candidate contest }
   /v1/contest/open:
     post:
       operationId: openContest
-      x-yc-apigateway-integration: *function
+      x-yc-apigateway-integration:
+        type: cloud_functions
+        function_id: ${function_id}
+        service_account_id: ${service_account_id}
       responses:
         '200': { description: Rules opened without starting timer }
   /v1/contest/start:
     post:
       operationId: startContest
-      x-yc-apigateway-integration: *function
+      x-yc-apigateway-integration:
+        type: cloud_functions
+        function_id: ${function_id}
+        service_account_id: ${service_account_id}
       responses:
         '200': { description: Server timer started idempotently }
   /v1/contest/answers/{taskId}:
@@ -52,26 +64,38 @@ paths:
         schema: { type: string }
     patch:
       operationId: saveContestAnswer
-      x-yc-apigateway-integration: *function
+      x-yc-apigateway-integration:
+        type: cloud_functions
+        function_id: ${function_id}
+        service_account_id: ${service_account_id}
       responses:
         '200': { description: Answer saved with optimistic revision }
         '409': { description: A newer revision exists }
   /v1/contest/run:
     post:
       operationId: runContestTests
-      x-yc-apigateway-integration: *function
+      x-yc-apigateway-integration:
+        type: cloud_functions
+        function_id: ${function_id}
+        service_account_id: ${service_account_id}
       responses:
         '200': { description: Sanitized sandbox test report }
   /v1/contest/submit:
     post:
       operationId: submitContest
-      x-yc-apigateway-integration: *function
+      x-yc-apigateway-integration:
+        type: cloud_functions
+        function_id: ${function_id}
+        service_account_id: ${service_account_id}
       responses:
         '200': { description: Contest frozen idempotently }
   /v1/admin/applications:
     get:
       operationId: listApplications
-      x-yc-apigateway-integration: *function
+      x-yc-apigateway-integration:
+        type: cloud_functions
+        function_id: ${function_id}
+        service_account_id: ${service_account_id}
       responses:
         '200': { description: Server-authorized application list }
   /v1/admin/applications/{applicationId}:
@@ -82,17 +106,26 @@ paths:
         schema: { type: string, format: uuid }
     get:
       operationId: getApplication
-      x-yc-apigateway-integration: *function
+      x-yc-apigateway-integration:
+        type: cloud_functions
+        function_id: ${function_id}
+        service_account_id: ${service_account_id}
       responses:
         '200': { description: Server-authorized application details }
     patch:
       operationId: updateApplication
-      x-yc-apigateway-integration: *function
+      x-yc-apigateway-integration:
+        type: cloud_functions
+        function_id: ${function_id}
+        service_account_id: ${service_account_id}
       responses:
         '200': { description: Status updated }
     delete:
       operationId: deleteApplication
-      x-yc-apigateway-integration: *function
+      x-yc-apigateway-integration:
+        type: cloud_functions
+        function_id: ${function_id}
+        service_account_id: ${service_account_id}
       responses:
         '200': { description: Application and resume deleted }
   /v1/admin/applications/{applicationId}/resume:
@@ -103,7 +136,10 @@ paths:
         schema: { type: string, format: uuid }
     get:
       operationId: downloadResume
-      x-yc-apigateway-integration: *function
+      x-yc-apigateway-integration:
+        type: cloud_functions
+        function_id: ${function_id}
+        service_account_id: ${service_account_id}
       responses:
         '200': { description: 60-second private download URL }
   /v1/admin/applications/{applicationId}/contest:
@@ -114,12 +150,18 @@ paths:
         schema: { type: string, format: uuid }
     get:
       operationId: getApplicationContest
-      x-yc-apigateway-integration: *function
+      x-yc-apigateway-integration:
+        type: cloud_functions
+        function_id: ${function_id}
+        service_account_id: ${service_account_id}
       responses:
         '200': { description: Contest and review details }
     post:
       operationId: issueApplicationContest
-      x-yc-apigateway-integration: *function
+      x-yc-apigateway-integration:
+        type: cloud_functions
+        function_id: ${function_id}
+        service_account_id: ${service_account_id}
       responses:
         '201': { description: Personal invitation created }
   /v1/admin/applications/{applicationId}/contest/resend:
@@ -130,7 +172,10 @@ paths:
         schema: { type: string, format: uuid }
     post:
       operationId: resendContestInvitation
-      x-yc-apigateway-integration: *function
+      x-yc-apigateway-integration:
+        type: cloud_functions
+        function_id: ${function_id}
+        service_account_id: ${service_account_id}
       responses:
         '200': { description: Existing invitation queued again }
   /v1/admin/applications/{applicationId}/contest/revoke:
@@ -141,7 +186,10 @@ paths:
         schema: { type: string, format: uuid }
     post:
       operationId: revokeContestInvitation
-      x-yc-apigateway-integration: *function
+      x-yc-apigateway-integration:
+        type: cloud_functions
+        function_id: ${function_id}
+        service_account_id: ${service_account_id}
       responses:
         '200': { description: Invitation revoked }
   /v1/admin/applications/{applicationId}/contest/extend:
@@ -152,7 +200,10 @@ paths:
         schema: { type: string, format: uuid }
     post:
       operationId: extendContestDeadline
-      x-yc-apigateway-integration: *function
+      x-yc-apigateway-integration:
+        type: cloud_functions
+        function_id: ${function_id}
+        service_account_id: ${service_account_id}
       responses:
         '200': { description: Deadline extended once }
   /v1/admin/applications/{applicationId}/contest/review:
@@ -163,6 +214,9 @@ paths:
         schema: { type: string, format: uuid }
     patch:
       operationId: reviewApplicationContest
-      x-yc-apigateway-integration: *function
+      x-yc-apigateway-integration:
+        type: cloud_functions
+        function_id: ${function_id}
+        service_account_id: ${service_account_id}
       responses:
         '200': { description: Internal review saved }
