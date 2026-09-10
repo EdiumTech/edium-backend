@@ -21,6 +21,7 @@ async function main() {
       if (!versions[language]) continue
       const result = await runSubmission(taskId, source, versions[language], language)
       if (!result.allPassed || result.passed !== result.total) {
+        process.stderr.write(`${JSON.stringify(result.tests)}\n`)
         throw new Error(`${language}/${taskId}: ${result.passed}/${result.total}`)
       }
       checks += result.total
