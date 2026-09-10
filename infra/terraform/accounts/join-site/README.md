@@ -67,7 +67,7 @@ See [local preview instructions](dev/README.md), [Kotlin](dev/KOTLIN-TOOLCHAIN.m
 
 ## Prerequisites
 
-- Terraform 1.5+.
+- Terraform 1.7+ (the deployment workflow uses 1.9).
 - A Yandex Cloud service-account key authorized to create these isolated resources.
 - Access to the existing private Terraform state bucket.
 - The existing private Yandex Container Registry and its id in the `YC_REGISTRY_ID` GitHub Environment secret.
