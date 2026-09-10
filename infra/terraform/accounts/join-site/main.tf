@@ -190,9 +190,9 @@ resource "yandex_api_gateway" "join" {
 
 resource "yandex_function_trigger" "maintenance" {
   name        = "edium-join-maintenance"
-  description = "Every five minutes: outbox delivery and orphan cleanup"
+  description = "Every minute: outbox delivery and orphan cleanup"
   folder_id   = var.folder_id
-  timer { cron_expression = "*/5 * ? * * *" }
+  timer { cron_expression = "* * ? * * *" }
   function {
     id                 = yandex_function.maintenance.id
     service_account_id = var.invoker_service_account_id
