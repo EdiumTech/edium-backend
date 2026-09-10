@@ -17,10 +17,10 @@ and do not create a second hosting stack for the main domain.
 
 ## Safe sequence
 
-1. Deploy the join API stack in `email_mode = "disabled"` and inspect its isolated Terraform plan.
-2. Build the landing with `VITE_JOIN_API_BASE` set to the API Gateway output.
+1. Build the digest-pinned QuickJS runner image, set `JOIN_RUNNER_IMAGE_URL`, and inspect the isolated Terraform plan with apply disabled. Confirm explicitly that it contains no deletions.
+2. After a separate production approval, deploy the join API stack in `email_mode = "disabled"`, then build the landing with `VITE_JOIN_API_BASE` set to the API Gateway output.
 3. Archive the current `/opt/edium/landing` directory for rollback, then upload the new `dist/` contents through the existing site release path.
-4. Verify `/`, `/join/`, `/join/admin/`, `/privacy/`, `/terms/`, asset MIME types, 404 behavior, TLS, and HTTP-to-HTTPS redirect.
+4. Verify `/`, `/join/`, `/join/admin/`, `/join/contest/`, `/privacy/`, `/terms/`, asset MIME types, 404 behavior, TLS, and HTTP-to-HTTPS redirect.
 5. Configure Herald SMTP plus the shared `EMAIL_API_KEY`, send only to controlled test inboxes, then enable `email_mode = "herald"` in the join stack.
 
 ## Rollback

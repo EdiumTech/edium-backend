@@ -21,10 +21,29 @@ resource "random_password" "ip_hash_salt" {
   special = false
 }
 
+resource "random_password" "contest_token_key" {
+  length  = 64
+  special = false
+}
+
 resource "yandex_iam_service_account" "runtime" {
   name        = "edium-join-runtime"
   description = "Least-privilege runtime for the Edium team application form"
   folder_id   = var.folder_id
+}
+
+resource "yandex_iam_service_account" "runner" {
+  count       = var.runner_image_url == "" ? 0 : 1
+  name        = "edium-join-runner"
+  description = "Image pull only; candidate code has no access to this identity"
+  folder_id   = var.folder_id
+}
+
+resource "yandex_resourcemanager_folder_iam_member" "runner_image_pull" {
+  count     = var.runner_image_url == "" ? 0 : 1
+  folder_id = var.folder_id
+  role      = "container-registry.images.puller"
+  member    = "serviceAccount:${yandex_iam_service_account.runner[0].id}"
 }
 
 resource "yandex_iam_service_account_static_access_key" "storage" {
@@ -60,12 +79,13 @@ resource "yandex_storage_bucket_iam_binding" "runtime_editor" {
   members = ["serviceAccount:${yandex_iam_service_account.runtime.id}"]
 }
 
-# Transitional resource from the first interrupted apply. One successful apply
-# disables deletion protection; the following cleanup revision removes it.
+# Kept in the isolated join stack and protected from accidental deletion. Contest
+# aggregates currently use conditional Object Storage writes; this reserved YDB
+# can support future query-heavy workflows without sharing another subsystem.
 resource "yandex_ydb_database_serverless" "applications" {
   name                = "edium-join-applications"
   folder_id           = var.folder_id
-  deletion_protection = false
+  deletion_protection = true
   serverless_database {
     enable_throttling_rcu_limit = true
     throttling_rcu_limit        = 10
@@ -82,17 +102,21 @@ resource "yandex_function" "api" {
   runtime            = "python312"
   entrypoint         = "handler.api"
   memory             = 512
-  execution_timeout  = 30
+  execution_timeout  = 125
   service_account_id = yandex_iam_service_account.runtime.id
   user_hash          = data.archive_file.function.output_base64sha256
   environment = {
-    RESUME_BUCKET   = yandex_storage_bucket.resumes.bucket
-    ALLOWED_ORIGINS = join(",", var.allowed_origins)
-    ADMIN_URL       = var.admin_url
-    S3_ACCESS_KEY   = yandex_iam_service_account_static_access_key.storage.access_key
-    S3_SECRET_KEY   = yandex_iam_service_account_static_access_key.storage.secret_key
-    ADMIN_TOKEN     = random_password.admin_token.result
-    IP_HASH_SALT    = random_password.ip_hash_salt.result
+    RESUME_BUCKET     = yandex_storage_bucket.resumes.bucket
+    ALLOWED_ORIGINS   = join(",", var.allowed_origins)
+    ADMIN_URL         = var.admin_url
+    S3_ACCESS_KEY     = yandex_iam_service_account_static_access_key.storage.access_key
+    S3_SECRET_KEY     = yandex_iam_service_account_static_access_key.storage.secret_key
+    ADMIN_TOKEN       = random_password.admin_token.result
+    IP_HASH_SALT      = random_password.ip_hash_salt.result
+    CONTEST_TOKEN_KEY = random_password.contest_token_key.result
+    CONTEST_URL       = var.contest_url
+    RUNNER_URL        = try(yandex_serverless_container.runner[0].url, "")
+    RUNNER_LANGUAGES  = var.runner_image_url == "" ? "javascript" : "javascript,kotlin,swift,python,go"
   }
   content { zip_filename = data.archive_file.function.output_path }
   log_options { min_level = "ERROR" }
@@ -112,17 +136,20 @@ resource "yandex_function" "maintenance" {
   service_account_id = yandex_iam_service_account.runtime.id
   user_hash          = data.archive_file.function.output_base64sha256
   environment = {
-    RESUME_BUCKET    = yandex_storage_bucket.resumes.bucket
-    ALLOWED_ORIGINS  = join(",", var.allowed_origins)
-    EMAIL_MODE       = var.email_mode
-    TEAM_EMAIL       = var.team_email
-    HERALD_EMAIL_URL = var.herald_email_url
-    ADMIN_URL        = var.admin_url
-    S3_ACCESS_KEY    = yandex_iam_service_account_static_access_key.storage.access_key
-    S3_SECRET_KEY    = yandex_iam_service_account_static_access_key.storage.secret_key
-    ADMIN_TOKEN      = random_password.admin_token.result
-    IP_HASH_SALT     = random_password.ip_hash_salt.result
-    HERALD_API_KEY   = var.herald_api_key
+    RESUME_BUCKET     = yandex_storage_bucket.resumes.bucket
+    ALLOWED_ORIGINS   = join(",", var.allowed_origins)
+    EMAIL_MODE        = var.email_mode
+    TEAM_EMAIL        = var.team_email
+    HERALD_EMAIL_URL  = var.herald_email_url
+    ADMIN_URL         = var.admin_url
+    S3_ACCESS_KEY     = yandex_iam_service_account_static_access_key.storage.access_key
+    S3_SECRET_KEY     = yandex_iam_service_account_static_access_key.storage.secret_key
+    ADMIN_TOKEN       = random_password.admin_token.result
+    IP_HASH_SALT      = random_password.ip_hash_salt.result
+    HERALD_API_KEY    = var.herald_api_key
+    CONTEST_TOKEN_KEY = random_password.contest_token_key.result
+    CONTEST_URL       = var.contest_url
+    RUNNER_URL        = ""
   }
   content { zip_filename = data.archive_file.function.output_path }
   log_options { min_level = "ERROR" }
@@ -137,6 +164,32 @@ resource "yandex_function" "maintenance" {
   }
 }
 
+resource "yandex_serverless_container" "runner" {
+  count              = var.runner_image_url == "" ? 0 : 1
+  name               = "edium-join-runner"
+  description        = "Private QuickJS/Wasm sandbox for the candidate contest"
+  folder_id          = var.folder_id
+  memory             = 6144
+  cores              = 3
+  core_fraction      = 100
+  execution_timeout  = "120s"
+  concurrency        = 1
+  service_account_id = yandex_iam_service_account.runner[0].id
+  image {
+    url = var.runner_image_url
+  }
+  log_options { min_level = "ERROR" }
+  labels     = local.tags
+  depends_on = [yandex_resourcemanager_folder_iam_member.runner_image_pull]
+}
+
+resource "yandex_serverless_container_iam_binding" "runner_invoker" {
+  count        = var.runner_image_url == "" ? 0 : 1
+  container_id = yandex_serverless_container.runner[0].id
+  role         = "serverless-containers.containerInvoker"
+  members      = ["serviceAccount:${yandex_iam_service_account.runtime.id}"]
+}
+
 resource "yandex_api_gateway" "join" {
   name        = "edium-join-api"
   description = "API Gateway for the Edium team application form"
@@ -145,6 +198,7 @@ resource "yandex_api_gateway" "join" {
   spec = templatefile("${path.module}/openapi.yaml.tftpl", {
     function_id        = yandex_function.api.id
     service_account_id = var.invoker_service_account_id
+    allowed_origins    = var.allowed_origins
   })
 }
 

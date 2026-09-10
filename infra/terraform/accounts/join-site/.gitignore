@@ -6,3 +6,4 @@ key.json
 function.zip
 terraform.tfvars
 __pycache__/
+runner/node_modules/

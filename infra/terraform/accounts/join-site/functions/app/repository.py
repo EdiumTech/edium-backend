@@ -8,7 +8,25 @@ from botocore.config import Config
 from botocore.exceptions import ClientError
 
 
-DATE_FIELDS = {"created_at", "updated_at", "expires_at", "next_notify_at"}
+DATE_FIELDS = {
+    "created_at",
+    "updated_at",
+    "expires_at",
+    "next_notify_at",
+    "start_before",
+    "opened_at",
+    "started_at",
+    "deadline_at",
+    "submitted_at",
+    "expired_at",
+    "revoked_at",
+    "extended_at",
+    "purge_after",
+}
+
+
+class ContestConflict(Exception):
+    pass
 
 
 def _json_default(value):
@@ -51,14 +69,19 @@ class Repository:
         return None
 
     def _get(self, key: str) -> dict | None:
+        value, _ = self._get_with_etag(key)
+        return value
+
+    def _get_with_etag(self, key: str) -> tuple[dict | None, str | None]:
         try:
-            body = self.client.get_object(Bucket=self.bucket, Key=key)["Body"].read()
+            result = self.client.get_object(Bucket=self.bucket, Key=key)
+            body = result["Body"].read()
         except ClientError as error:
             code = str(error.response.get("Error", {}).get("Code", ""))
             if code in {"NoSuchKey", "NoSuchObject", "404"}:
-                return None
+                return None, None
             raise
-        return _decode_dates(json.loads(body.decode("utf-8")))
+        return _decode_dates(json.loads(body.decode("utf-8"))), result.get("ETag")
 
     def _put(self, key: str, payload: dict) -> None:
         body = json.dumps(payload, ensure_ascii=False, default=_json_default).encode("utf-8")
@@ -69,6 +92,29 @@ class Repository:
             ContentType="application/json; charset=utf-8",
             CacheControl="no-store",
         )
+
+    def _put_if_absent(self, key: str, payload: dict) -> None:
+        self._conditional_put(key, payload, IfNoneMatch="*")
+
+    def _put_if_match(self, key: str, payload: dict, etag: str) -> None:
+        self._conditional_put(key, payload, IfMatch=etag)
+
+    def _conditional_put(self, key: str, payload: dict, **condition) -> None:
+        body = json.dumps(payload, ensure_ascii=False, default=_json_default).encode("utf-8")
+        try:
+            self.client.put_object(
+                Bucket=self.bucket,
+                Key=key,
+                Body=body,
+                ContentType="application/json; charset=utf-8",
+                CacheControl="no-store",
+                **condition,
+            )
+        except ClientError as error:
+            code = str(error.response.get("Error", {}).get("Code", ""))
+            if code in {"PreconditionFailed", "ConditionalRequestConflict", "409", "412"}:
+                raise ContestConflict() from error
+            raise
 
     def _delete(self, key: str) -> None:
         self.client.delete_object(Bucket=self.bucket, Key=key)
@@ -97,6 +143,10 @@ class Repository:
     def _application_key(application_id: str) -> str:
         return f"metadata/applications/{application_id}.json"
 
+    @staticmethod
+    def _contest_key(contest_id: str) -> str:
+        return f"metadata/contests/{contest_id}.json"
+
     def allow_request(self, bucket_key: str, expires_at: datetime, limit: int) -> bool:
         digest = hashlib.sha256(bucket_key.encode()).hexdigest()
         key = f"metadata/rate-limits/{digest}.json"
@@ -109,6 +159,31 @@ class Repository:
             return False
         self._put(key, {"request_count": count + 1, "expires_at": expires_at})
         return True
+
+    def allow_contest_request(self, bucket_key: str, expires_at: datetime, limit: int) -> bool:
+        """Optimistic counter used for token and runner endpoints.
+
+        A conflict is retried from the latest object, so concurrent requests cannot
+        both consume the same remaining slot.
+        """
+        digest = hashlib.sha256(bucket_key.encode()).hexdigest()
+        key = f"metadata/contest-rate-limits/{digest}.json"
+        for _ in range(5):
+            now = datetime.now(timezone.utc)
+            record, etag = self._get_with_etag(key)
+            count = int(record["request_count"]) if record and record["expires_at"] > now else 0
+            if count >= limit:
+                return False
+            next_record = {"request_count": count + 1, "expires_at": expires_at}
+            try:
+                if etag:
+                    self._put_if_match(key, next_record, etag)
+                else:
+                    self._put_if_absent(key, next_record)
+                return True
+            except ContestConflict:
+                continue
+        return False
 
     def get_upload(self, upload_id: str) -> dict | None:
         return self._get(self._upload_key(upload_id))
@@ -150,6 +225,94 @@ class Repository:
 
     def get_application(self, application_id: str) -> dict | None:
         return self._get(self._application_key(application_id))
+
+    def create_contest(self, contest: dict) -> bool:
+        try:
+            self._put_if_absent(self._contest_key(contest["contest_id"]), contest)
+            return True
+        except ContestConflict:
+            return False
+
+    def get_contest(self, contest_id: str) -> dict | None:
+        return self._get(self._contest_key(contest_id))
+
+    def get_contest_with_etag(self, contest_id: str) -> tuple[dict | None, str | None]:
+        return self._get_with_etag(self._contest_key(contest_id))
+
+    def save_contest(self, contest: dict, etag: str) -> None:
+        self._put_if_match(self._contest_key(contest["contest_id"]), contest, etag)
+
+    def find_contest_by_application(self, application_id: str) -> dict | None:
+        rows = [
+            item
+            for item in self._list("metadata/contests/")
+            if item.get("application_id") == application_id
+        ]
+        rows.sort(key=lambda item: item["created_at"], reverse=True)
+        return rows[0] if rows else None
+
+    def list_contests(self, state: str | None = None) -> list[dict]:
+        rows = [
+            item
+            for item in self._list("metadata/contests/")
+            if not state or item.get("state") == state
+        ]
+        rows.sort(key=lambda item: item["created_at"], reverse=True)
+        return rows[:200]
+
+    def pending_contest_notifications(self, now: datetime) -> list[dict]:
+        rows = [
+            item
+            for item in self._list("metadata/contests/")
+            if item.get("next_notify_at")
+            and item["next_notify_at"] <= now
+            and (
+                item.get("invitation_notification_status") == "pending"
+                or item.get("completion_notification_status") == "pending"
+            )
+        ]
+        rows.sort(key=lambda item: item["next_notify_at"])
+        return rows[:50]
+
+    def update_contest_notifications(
+        self,
+        contest_id: str,
+        *,
+        invitation_status: str,
+        completion_status: str,
+        attempts: int,
+        next_attempt_at: datetime,
+    ) -> None:
+        for _ in range(5):
+            contest, etag = self.get_contest_with_etag(contest_id)
+            if not contest or not etag:
+                return
+            contest.update(
+                {
+                    "invitation_notification_status": invitation_status,
+                    "completion_notification_status": completion_status,
+                    "notify_attempts": attempts,
+                    "next_notify_at": next_attempt_at,
+                }
+            )
+            try:
+                self.save_contest(contest, etag)
+                return
+            except ContestConflict:
+                continue
+
+    def delete_contests_for_application(self, application_id: str) -> None:
+        for contest in self.list_contests():
+            if contest.get("application_id") == application_id:
+                self._delete(self._contest_key(contest["contest_id"]))
+
+    def purge_retained_contests(self, now: datetime) -> int:
+        removed = 0
+        for contest in self.list_contests():
+            if contest.get("purge_after") and contest["purge_after"] <= now:
+                self._delete(self._contest_key(contest["contest_id"]))
+                removed += 1
+        return removed
 
     def update_status(self, application_id: str, status: str, updated_at: datetime) -> bool:
         application = self.get_application(application_id)

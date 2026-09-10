@@ -1,0 +1,116 @@
+// Test-only reference implementations. Never copy into the runner image.
+const referenceSolutions = {
+  "boost-button-cat": function solve(input) {
+    let step = input.initialStep
+    const lastAccepted = new Map(), acceptedIds = [], ignoredIds = []
+    for (const event of input.events) {
+      if (lastAccepted.has(event.button) && event.at - lastAccepted.get(event.button) < input.debounceMs) {
+        ignoredIds.push(event.id)
+        continue
+      }
+      lastAccepted.set(event.button, event.at)
+      acceptedIds.push(event.id)
+      if (event.button === 'home') step = 0
+      else if (event.action === 'hold') step = event.button === 'next' ? input.stepCount - 1 : 0
+      else step = Math.max(0, Math.min(input.stepCount - 1, step + (event.button === 'next' ? 1 : -1)))
+    }
+    return { step, acceptedIds, ignoredIds }
+  },
+  "boost-lamp-queue": function solve(input) {
+    const devices = new Set(input.devices.map(device => device.id)), seen = new Set(), latest = new Map()
+    for (const command of input.commands) {
+      if (seen.has(command.commandId)) continue
+      seen.add(command.commandId)
+      if (!devices.has(command.deviceId)) continue
+      const prior = latest.get(command.deviceId)
+      if (!prior || command.revision >= prior.revision) latest.set(command.deviceId, command)
+    }
+    const result = { send: [], waitingIds: [], abandonedIds: [], acknowledgedIds: [] }
+    for (const device of input.devices) {
+      const command = latest.get(device.id)
+      if (!command) continue
+      if (command.acked) result.acknowledgedIds.push(command.commandId)
+      else if (command.attempts >= input.maxAttempts) result.abandonedIds.push(command.commandId)
+      else if (!device.online) result.waitingIds.push(command.commandId)
+      else result.send.push({ commandId: command.commandId, deviceId: device.id, action: command.action, attempt: command.attempts + 1 })
+    }
+    return result
+  },
+  "boost-weather-card": function solve(input) {
+    const cards = new Map(input.cards.map(card => [card.id, { ...card, error: false }]))
+    for (const event of input.events) {
+      const card = cards.get(event.cardId)
+      if (!card || event.at > input.now || event.revision <= card.revision) continue
+      card.revision = event.revision
+      card.error = !event.ok
+      if (event.ok) { card.value = event.value; card.updatedAt = event.at }
+    }
+    let alert = null
+    for (const next of input.alerts) {
+      if (next.startsAt <= input.now && input.now < next.endsAt && (!alert || next.priority > alert.priority)) alert = next
+    }
+    return {
+      cards: [...cards.values()].map(card => ({ id: card.id, value: card.value, revision: card.revision, stale: input.now - card.updatedAt >= input.ttl, error: card.error })),
+      visible: alert ? { kind: 'alert', id: alert.id, text: alert.text } : { kind: 'card', id: input.selectedId },
+    }
+  },
+  "mobile-outbox-cat": function solve(input) {
+    const seen = new Set(), byEntity = new Map(), duplicateIds = []
+    for (const operation of input.operations) {
+      if (seen.has(operation.id)) { duplicateIds.push(operation.id); continue }
+      seen.add(operation.id)
+      const prior = byEntity.get(operation.entityId)
+      if (!prior || operation.revision >= prior.revision) byEntity.set(operation.entityId, operation)
+    }
+    const items = [], deletedIds = []
+    for (const id of [...byEntity.keys()].sort()) {
+      const operation = byEntity.get(id)
+      if (operation.kind === 'delete') deletedIds.push(id)
+      else items.push({ id, value: operation.value, revision: operation.revision })
+    }
+    return { items, deletedIds, duplicateIds }
+  },
+  "mobile-permission-panda": function solve(input) {
+    const seen = new Set(), result = { readyIds: [], settingsIds: [], deferredIds: [], rationaleIds: [], promptIds: [], ignoredIds: [] }
+    for (const request of input.requests) {
+      if (seen.has(request.permission)) { result.ignoredIds.push(request.id); continue }
+      seen.add(request.permission)
+      const state = input.grants[request.permission] || 'unknown'
+      const key = state === 'granted' ? 'readyIds' : state === 'blocked' ? 'settingsIds' : !input.foreground ? 'deferredIds' : state === 'denied' && !request.explained ? 'rationaleIds' : 'promptIds'
+      result[key].push(request.id)
+    }
+    return result
+  },
+  "mobile-download-lunch": function solve(input) {
+    let remainingBytes = input.storageBytes
+    const selectedIds = [], skipped = []
+    for (const job of [...input.jobs].sort((a, b) => b.priority - a.priority)) {
+      const reason = !input.onWifi && !job.allowCellular ? 'wifi' : input.batteryPercent < input.minBatteryPercent && !job.essential ? 'battery' : job.bytes > remainingBytes ? 'storage' : null
+      if (reason) skipped.push({ id: job.id, reason })
+      else { selectedIds.push(job.id); remainingBytes -= job.bytes }
+    }
+    return { selectedIds, skipped, remainingBytes }
+  },
+  "notification-bouncer": function solve(input){const r={deliveredIds:[],mutedIds:[],duplicateIds:[]},seen=new Set();const {start,end}=input.quiet;const quiet=start!==end&&(start<end?input.nowMinute>=start&&input.nowMinute<end:input.nowMinute>=start||input.nowMinute<end);for(const n of input.notifications){if(seen.has(n.id)){r.duplicateIds.push(n.id);continue}seen.add(n.id);r[input.enabledChannels.includes(n.channel)&&(!quiet||n.urgent===true)?"deliveredIds":"mutedIds"].push(n.id)}return r},
+  "cart-without-drama": function solve(input){const subtotal=input.items.reduce((s,x)=>s+x.price*x.quantity,0);let discount=0,couponId=null;for(const c of input.coupons){const d=Math.min(subtotal,c.kind==="fixed"?c.value:Math.floor(subtotal*c.value/100));if(d>discount){discount=d;couponId=c.id}}const shipping=subtotal>0&&subtotal-discount<input.freeDeliveryFrom?input.deliveryFee:0;return{subtotal,discount,couponId,shipping,total:subtotal-discount+shipping}},
+  "feature-flag-tea": function solve(input){const values={...input.defaults},priorities={};for(const r of input.overrides){if(!Object.hasOwn(values,r.flag)||!(r.audience==="*"||input.groups.includes(r.audience)))continue;if(!Object.hasOwn(priorities,r.flag)||r.priority>=priorities[r.flag]){values[r.flag]=r.value;priorities[r.flag]=r.priority}}return{values,enabled:Object.keys(values).filter(k=>values[k]).sort()}},
+  "prompt-suitcase": function solve(input){let remainingTokens=Math.max(0,input.maxTokens-input.reservedTokens);const budget=remainingTokens,seen=new Set(),blocks=[];for(const b of input.blocks){if(seen.has(b.id))continue;seen.add(b.id);blocks.push(b)}blocks.sort((a,b)=>b.priority-a.priority);const selectedIds=[];for(const b of blocks){if(b.tokens<=remainingTokens){selectedIds.push(b.id);remainingTokens-=b.tokens}}return{selectedIds,usedTokens:budget-remainingTokens,remainingTokens}},
+  "robot-citation-desk": function solve(input){const supportedIds=[],uncertainIds=[];let requiredMissing=false;for(const c of input.claims){const ok=input.sources.some(s=>s.claimId===c.id&&s.status==="verified"&&s.confidence>=input.minConfidence&&input.currentDay-s.day>=0&&input.currentDay-s.day<=input.maxAgeDays);(ok?supportedIds:uncertainIds).push(c.id);if(!ok&&c.required)requiredMissing=true}return{supportedIds,uncertainIds,action:requiredMissing?"human_review":uncertainIds.length?"caution":"answer"}},
+  "model-routing-cafe": function solve(input){const list=input.models.filter(m=>m.contextWindow>=input.tokens&&m.cost<=input.maxCost&&(!input.localOnly||m.local)&&(!input.needsTools||m.tools));list.sort((a,b)=>b.quality-a.quality||a.cost-b.cost||(a.id<b.id?-1:a.id>b.id?1:0));return list.length?{modelId:list[0].id,cost:list[0].cost}:{modelId:null,cost:0}},
+  "sensor-cat": function solve(input){let finalAlarm=input.initialAlarm,validReadings=0;const states=input.readings.map(raw=>{if(raw===null)return"no_signal";validReadings++;const v=raw+input.offset;if(v>=input.high)finalAlarm=true;else if(v<=input.low)finalAlarm=false;return finalAlarm?"alarm":"ok"});return{states,finalAlarm,validReadings}},
+  "battery-buffet": function solve(input){const essentials=input.modules.filter(m=>m.essential),required=essentials.reduce((s,m)=>s+m.watts,0);if(required>input.budget)return{mode:"overload",enabledIds:[],disabledIds:input.modules.map(m=>m.id),remaining:input.budget};let remaining=input.budget-required;const enabled=new Set(essentials.map(m=>m.id));for(const m of input.modules.filter(m=>!m.essential).sort((a,b)=>b.priority-a.priority)){if(m.watts<=remaining){enabled.add(m.id);remaining-=m.watts}}return{mode:"ok",enabledIds:input.modules.filter(m=>enabled.has(m.id)).map(m=>m.id),disabledIds:input.modules.filter(m=>!enabled.has(m.id)).map(m=>m.id),remaining}},
+  "packet-postman": function solve(input){let corrupted=0,duplicates=0;const bySeq=new Map();for(const f of input.frames){if((f.seq+f.payload.reduce((a,b)=>a+b,0))%256!==f.checksum){corrupted++;continue}if(bySeq.has(f.seq)){duplicates++;continue}bySeq.set(f.seq,{seq:f.seq,payload:f.payload})}const received=[...bySeq.values()].sort((a,b)=>a.seq-b.seq),missing=[];if(received.length>1)for(let i=received[0].seq;i<=received[received.length-1].seq;i++)if(!bySeq.has(i))missing.push(i);return{received,missing,corrupted,duplicates}},
+  "meeting-cookie": function solve(input){const active=input.meetings.filter(m=>!m.cancelled),conflicts=[];for(let i=0;i<active.length;i++)for(let j=i+1;j<active.length;j++){const a=active[i],b=active[j];if(a.room===b.room&&a.start<b.end&&b.start<a.end)conflicts.push([a.id,b.id].sort())}conflicts.sort((a,b)=>a[0]<b[0]?-1:a[0]>b[0]?1:a[1]<b[1]?-1:a[1]>b[1]?1:0);return{conflicts}},
+  "snack-economy": function solve(input){const order=[];for(const x of input.items){const need=x.target-Math.max(0,x.stock-x.reserved);if(x.discontinued||need<=0)continue;const packs=Math.ceil(need/x.packSize);order.push({id:x.id,packs,units:packs*x.packSize})}return{order,totalUnits:order.reduce((s,x)=>s+x.units,0)}},
+  "helpdesk-cat": function solve(input){const assigned=Object.fromEntries(Object.keys(input.capacities).map(k=>[k,[]])),waiting=[];const tickets=[...input.tickets].sort((a,b)=>b.urgency-a.urgency||b.waitingMinutes-a.waitingMinutes||(a.id<b.id?-1:a.id>b.id?1:0));for(const t of tickets){const team=Object.hasOwn(input.routes,t.category)?input.routes[t.category]:"general";if(assigned[team].length<input.capacities[team])assigned[team].push(t.id);else waiting.push(t.id)}return{assigned,waiting}},
+  "card-casting": function solve(input){if(!input.count)return{columns:0,cardWidth:0,rows:0};const available=Math.max(0,input.width-2*input.padding);let columns=1;for(let c=1;c<=Math.min(input.maxColumns,input.count);c++)if(c*input.minCardWidth+(c-1)*input.gap<=available)columns=c;return{columns,cardWidth:Math.floor((available-(columns-1)*input.gap)/columns),rows:Math.ceil(input.count/columns)}},
+  "palette-police": function solve(input){const failedIds=[];let passedCount=0;for(const e of input.elements){const ratio=(Math.max(e.foreground,e.background)+.05)/(Math.min(e.foreground,e.background)+.05);const target=e.fontSize>=24||(e.fontSize>=18&&e.bold)?3:4.5;if(ratio>=target)passedCount++;else failedIds.push(e.id)}return{failedIds,passedCount}},
+  "copy-fit": function solve(input){return{labels:input.labels.map(l=>{const variants=l.variants.map(s=>s.trim()).filter(Boolean),fit=variants.find(s=>Array.from(s).length<=input.maxChars);if(fit!==undefined)return{id:l.id,text:fit,truncated:false};if(!variants.length)return{id:l.id,text:"",truncated:false};return{id:l.id,text:input.maxChars?Array.from(variants[0]).slice(0,input.maxChars-1).join("")+"…":"",truncated:true}})}},
+  "funnel-not-fortune": function solve(input){const seen=new Set(),events=[];for(const e of input.events)if(!seen.has(e.eventId)){seen.add(e.eventId);events.push(e)}events.sort((a,b)=>a.at-b.at);const stages=["visit","signup","lesson","complete"],users=new Map();for(const e of events){const stage=users.get(e.userId)||0;if(stages[stage]===e.step)users.set(e.userId,stage+1)}const states=[...users.values()],visited=states.filter(n=>n>=1).length,signedUp=states.filter(n=>n>=2).length,startedLesson=states.filter(n=>n>=3).length,completedLesson=states.filter(n=>n>=4).length;return{visited,signedUp,startedLesson,completedLesson,activationPercent:signedUp?Math.floor(100*completedLesson/signedUp):0}},
+  "ab-no-confetti": function solve(input){if(input.variants.some(v=>v.visitors<input.minVisitors))return{status:"wait",winnerId:null};const b=input.variants.find(v=>v.id===input.baselineId);const eligible=input.variants.filter(v=>v.id!==b.id&&v.conversions*b.visitors>b.conversions*v.visitors&&100*(v.conversions*b.visitors-b.conversions*v.visitors)>=input.minLiftPP*v.visitors*b.visitors);eligible.sort((a,b)=>b.conversions*a.visitors-a.conversions*b.visitors||(a.id<b.id?-1:a.id>b.id?1:0));return eligible.length?{status:"winner",winnerId:eligible[0].id}:{status:"no_winner",winnerId:null}},
+  "subscription-night-shift": function solve(input){const active=input.plans.filter(p=>!p.revoked&&p.startsDay<=input.day&&input.day<p.endsDay),quotas={};for(const p of active)for(const[k,v]of Object.entries(p.quotas)){if(!Object.hasOwn(quotas,k)||v===null||quotas[k]!==null&&v>quotas[k])quotas[k]=v}return{activePlanIds:active.map(p=>p.id).sort(),quotas}},
+  "utm-laundry": function solve(input){let selected=null;for(const t of input.touchpoints){if(t.at<input.startAt||t.at>=input.endAt)continue;const source=t.source.trim().toLowerCase(),medium=t.medium.trim().toLowerCase();if(medium==="internal"||source===""||source==="direct")continue;if(!selected||t.at>=selected.at)selected={source,medium:medium||"unknown",at:t.at}}return selected?{source:selected.source,medium:selected.medium}:{source:"direct",medium:"none"}},
+  "newsletter-bouncer": function solve(input){const groups=new Map();for(const c of input.contacts){const email=c.email.trim().toLowerCase(),r=groups.get(email)||{email,consent:false,unsubscribed:false,lastSentDay:null};r.consent=r.consent||c.consent;r.unsubscribed=r.unsubscribed||c.unsubscribed;if(c.lastSentDay!==null&&(r.lastSentDay===null||c.lastSentDay>r.lastSentDay))r.lastSentDay=c.lastSentDay;groups.set(email,r)}const recipients=[],excluded=[];for(const r of [...groups.values()].sort((a,b)=>a.email<b.email?-1:a.email>b.email?1:0)){const reason=r.unsubscribed?"unsubscribed":!r.consent?"no_consent":r.lastSentDay!==null&&input.nowDay-r.lastSentDay<input.cooldownDays?"cooldown":null;if(reason)excluded.push({email:r.email,reason});else recipients.push(r.email)}return{recipients,excluded}},
+  "campaign-not-vanity": function solve(input){const seen=new Set(),groups=new Map();for(const x of input.rows){if(seen.has(x.id))continue;seen.add(x.id);const r=groups.get(x.campaign)||{campaign:x.campaign,spend:0,revenue:0,orders:0};r.spend+=x.spend;r.revenue+=x.revenue;r.orders+=x.orders;groups.set(x.campaign,r)}const campaigns=[...groups.values()].map(r=>({...r,profit:r.revenue-r.spend,verdict:r.spend===0?(r.revenue>0?"organic":"empty"):(r.orders>=input.minOrders&&r.revenue>=r.spend*input.targetROAS?"scale":"learn")}));campaigns.sort((a,b)=>b.profit-a.profit||(a.campaign<b.campaign?-1:a.campaign>b.campaign?1:0));return{campaigns}},
+}
+module.exports = { referenceSolutions }

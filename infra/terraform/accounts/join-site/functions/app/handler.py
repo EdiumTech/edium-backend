@@ -9,8 +9,34 @@ from datetime import datetime, timedelta, timezone
 
 from botocore.exceptions import ClientError
 
+from contest import (
+    CONTEST_STATES,
+    ContestError,
+    answer_language,
+    assigned_task_set,
+    attach_token_hash,
+    candidate_view,
+    clone,
+    contest_id_from_token,
+    expire_if_due,
+    extend_contest,
+    invitation_token,
+    mark_invitation_pending,
+    new_contest,
+    open_contest,
+    revoke_contest,
+    save_answer,
+    start_contest,
+    submit_contest,
+    token_matches,
+    update_review,
+    utcnow,
+    validate_source,
+)
+from contest_content import ACTIVE_DIRECTIONS, public_tasks, task_ids, track_label
 from mailer import Mailer
-from repository import Repository
+from repository import ContestConflict, Repository
+from runner import RunnerUnavailable, SandboxRunner
 from storage import InvalidResume, ResumeStorage
 from validation import STATUSES, ValidationError, validate_application, validate_upload
 
@@ -123,6 +149,158 @@ def require_admin(event: dict) -> None:
         raise PermissionError()
 
 
+def contest_token(event: dict) -> str:
+    authorization = header(event, "authorization") or ""
+    prefix = "Contest "
+    if not authorization.startswith(prefix):
+        raise ContestError("invalid_invite", "Ссылка на контест недействительна.", 404)
+    return authorization[len(prefix) :]
+
+
+def invite_url(contest: dict) -> str:
+    base = os.getenv("CONTEST_URL", "https://edium.online/join/contest/").rstrip("/") + "/"
+    token = invitation_token(contest["contest_id"], os.environ["CONTEST_TOKEN_KEY"])
+    return f"{base}#invite={token}"
+
+
+def get_authorized_contest(event: dict) -> tuple[dict, str, str]:
+    token = contest_token(event)
+    contest_id = contest_id_from_token(token)
+    contest, etag = repository().get_contest_with_etag(contest_id)
+    if not contest or not etag or not token_matches(contest, token, os.environ["CONTEST_TOKEN_KEY"]):
+        raise ContestError("invalid_invite", "Ссылка на контест недействительна.", 404)
+    return contest, etag, token
+
+
+def contest_rate_limit(event: dict, token: str, action: str, limit: int, minutes: int) -> None:
+    now = utcnow()
+    window = int(now.timestamp()) // (minutes * 60)
+    digest = hmac.new(
+        os.environ["IP_HASH_SALT"].encode(),
+        f"{source_ip(event)}:{hashlib.sha256(token.encode()).hexdigest()}:{action}:{window}".encode(),
+        hashlib.sha256,
+    ).hexdigest()
+    allowed = repository().allow_contest_request(
+        f"contest:{action}:{digest}", now + timedelta(minutes=minutes + 1), limit
+    )
+    if not allowed:
+        raise ContestError("rate_limited", "Слишком много запросов. Подожди немного.", 429)
+
+
+def save_contest_or_conflict(contest: dict, etag: str) -> None:
+    try:
+        repository().save_contest(contest, etag)
+    except ContestConflict as error:
+        raise ContestError("revision_conflict", "В другой вкладке уже сохранена более новая версия.", 409) from error
+
+
+def save_idempotent_transition(token: str, contest: dict, etag: str, transition) -> dict:
+    """Persist start/open/submit exactly once even when two tabs race."""
+    for _ in range(5):
+        changed = transition(contest, utcnow())
+        if not changed:
+            return contest
+        try:
+            repository().save_contest(contest, etag)
+            return contest
+        except ContestConflict:
+            contest_id = contest_id_from_token(token)
+            contest, etag = repository().get_contest_with_etag(contest_id)
+            if not contest or not etag or not token_matches(contest, token, os.environ["CONTEST_TOKEN_KEY"]):
+                raise ContestError("invalid_invite", "Ссылка на контест недействительна.", 404)
+    raise ContestError("revision_conflict", "Не удалось сохранить изменение. Попробуй ещё раз.", 409)
+
+
+def contest_payload(contest: dict, *, include_tasks: bool = True) -> dict:
+    payload = candidate_view(contest)
+    if include_tasks:
+        payload["tasks"] = public_tasks(assigned_task_set(contest))
+    return payload
+
+
+def open_candidate_contest(event: dict) -> dict:
+    contest, etag, token = get_authorized_contest(event)
+    contest_rate_limit(event, token, "open", 30, 15)
+    contest = save_idempotent_transition(token, contest, etag, open_contest)
+    return response(200, {"contest": contest_payload(contest)}, event)
+
+
+def read_candidate_contest(event: dict) -> dict:
+    contest, etag, token = get_authorized_contest(event)
+    contest_rate_limit(event, token, "read", 120, 15)
+    contest = save_idempotent_transition(token, contest, etag, expire_if_due)
+    return response(200, {"contest": contest_payload(contest)}, event)
+
+
+def start_candidate_contest(event: dict) -> dict:
+    contest, etag, token = get_authorized_contest(event)
+    contest_rate_limit(event, token, "start", 10, 15)
+    contest = save_idempotent_transition(token, contest, etag, start_contest)
+    if contest["state"] == "expired":
+        raise ContestError("expired", "Срок начала контеста истёк.", 410)
+    return response(200, {"contest": contest_payload(contest)}, event)
+
+
+def save_candidate_answer(event: dict, task_id: str) -> dict:
+    contest, etag, token = get_authorized_contest(event)
+    contest_rate_limit(event, token, "save", 240, 15)
+    payload = body_json(event)
+    expected = payload.get("revision")
+    if not isinstance(expected, int):
+        raise ContestError("invalid_revision", "Не удалось определить версию ответа.")
+    now = utcnow()
+    if expire_if_due(contest, now):
+        save_contest_or_conflict(contest, etag)
+        raise ContestError("expired", "Время истекло. Сохранена последняя серверная версия.", 410)
+    changed = save_answer(contest, task_id, payload, expected, now)
+    if changed:
+        save_contest_or_conflict(contest, etag)
+    return response(200, {"saved": True, "contest": contest_payload(contest, include_tasks=False)}, event)
+
+
+def run_candidate_tests(event: dict) -> dict:
+    contest, etag, token = get_authorized_contest(event)
+    contest_rate_limit(event, token, "run", 30, 15)
+    now = utcnow()
+    if expire_if_due(contest, now):
+        save_contest_or_conflict(contest, etag)
+        raise ContestError("expired", "Время истекло. Код больше нельзя запускать.", 410)
+    if contest["state"] != "started":
+        raise ContestError("not_started", "Сначала запусти контест.", 409)
+    payload = body_json(event)
+    task_id = payload.get("taskId")
+    source = payload.get("source")
+    version = assigned_task_set(contest)
+    if not isinstance(task_id, str) or task_id not in task_ids(version):
+        raise ContestError("unknown_task", "Задача не найдена.", 404)
+    validate_source(source)
+    language = answer_language(contest, task_id, payload.get("language"))
+    try:
+        result = SandboxRunner().run(task_id, source, version, language)
+    except RunnerUnavailable as error:
+        raise ContestError("runner_unavailable", "Песочница временно недоступна. Код сохранён; попробуй позже.", 503) from error
+    return response(200, {"result": result}, event)
+
+
+def submit_candidate_contest(event: dict) -> dict:
+    contest, etag, token = get_authorized_contest(event)
+    contest_rate_limit(event, token, "submit", 10, 15)
+    contest = save_idempotent_transition(token, contest, etag, submit_contest)
+    return response(200, {"submitted": contest["state"] == "submitted", "contest": contest_payload(contest, include_tasks=False)}, event)
+
+
+def admin_contest_view(contest: dict, application: dict) -> dict:
+    result = clone(contest)
+    result.pop("token_hash", None)
+    result["id"] = result.pop("contest_id")
+    result["applicationId"] = result.pop("application_id")
+    result["inviteUrl"] = invite_url(contest) if contest["state"] not in {"submitted", "expired", "revoked"} else None
+    result["hasEmail"] = bool(application.get("email"))
+    result["tasks"] = public_tasks(assigned_task_set(contest))
+    result["trackLabel"] = track_label(assigned_task_set(contest))
+    return result
+
+
 def create_upload(event: dict) -> dict:
     payload = body_json(event)
     ensure_started_recently(payload)
@@ -217,7 +395,7 @@ def create_application(event: dict) -> dict:
     return response(201 if created else 200, {"saved": True, "applicationId": saved["application_id"], "duplicate": not created}, event)
 
 
-def public_application(item: dict, detail: bool = False) -> dict:
+def public_application(item: dict, detail: bool = False, contest: dict | None = None) -> dict:
     result = {
         "id": item["application_id"],
         "createdAt": item["created_at"],
@@ -225,6 +403,7 @@ def public_application(item: dict, detail: bool = False) -> dict:
         "lastName": item["last_name"],
         "direction": item.get("direction"),
         "status": item["status"],
+        "contestState": contest.get("state") if contest else None,
     }
     if detail:
         result.update(
@@ -238,19 +417,110 @@ def public_application(item: dict, detail: bool = False) -> dict:
                 "resumeName": item["resume_name"],
                 "resumeSize": item["resume_size"],
                 "resumeMediaType": item["resume_media_type"],
+                "contest": admin_contest_view(contest, item) if contest else None,
             }
         )
     return result
 
 
+def admin_contest_route(event: dict, method: str, application: dict, action: str | None) -> dict:
+    now = utcnow()
+    existing = repository().find_contest_by_application(application["application_id"])
+    if method == "POST" and action is None:
+        if existing:
+            return response(409, {"message": "Для кандидата уже создан контест.", "contest": admin_contest_view(existing, application)}, event)
+        payload = body_json(event)
+        duration = payload.get("durationMinutes", 90)
+        start_within_days = payload.get("startWithinDays", 7)
+        requested_direction = payload.get("direction")
+        if not isinstance(duration, int) or not isinstance(start_within_days, int) or start_within_days < 1 or start_within_days > 30:
+            raise ContestError("invalid_invitation", "Проверь продолжительность и срок начала.")
+        if requested_direction is not None and (
+            not isinstance(requested_direction, str) or requested_direction not in ACTIVE_DIRECTIONS
+        ):
+            raise ContestError("invalid_direction", "Выбери доступный набор задач.")
+        # Older admin clients did not send a direction. Keep their behaviour for
+        # compatibility, while the current UI assigns the task set explicitly.
+        contest_direction = requested_direction or application.get("direction")
+        contest, _ = new_contest(
+            application["application_id"], duration, now + timedelta(days=start_within_days), now,
+            direction=contest_direction,
+        )
+        required_native_languages = set(candidate_view(contest)["languages"]) - {"javascript"}
+        if required_native_languages and not required_native_languages.issubset(SandboxRunner().supported_languages):
+            language_labels = {"kotlin": "Kotlin", "swift": "Swift", "python": "Python", "go": "Go"}
+            required_labels = " и ".join(language_labels[language] for language in sorted(required_native_languages))
+            raise ContestError(
+                "runtime_unavailable",
+                f"Контест пока недоступен: сначала настройте изолированный запуск {required_labels}.",
+                503,
+            )
+        attach_token_hash(contest, os.environ["CONTEST_TOKEN_KEY"])
+        if not application.get("email"):
+            contest["invitation_notification_status"] = "not_requested"
+        if not repository().create_contest(contest):
+            return response(409, {"message": "Контест уже создан."}, event)
+        return response(201, {"contest": admin_contest_view(contest, application)}, event)
+    if not existing:
+        return response(404, {"message": "Контест ещё не создан."}, event)
+    contest, etag = repository().get_contest_with_etag(existing["contest_id"])
+    if not contest or not etag:
+        return response(404, {"message": "Контест не найден."}, event)
+    if method == "GET" and action is None:
+        return response(200, {"contest": admin_contest_view(contest, application)}, event)
+    if method == "POST" and action == "resend":
+        if not application.get("email"):
+            return response(409, {"message": "У кандидата нет email — скопируй персональную ссылку."}, event)
+        mark_invitation_pending(contest, now)
+    elif method == "POST" and action == "revoke":
+        revoke_contest(contest, now)
+    elif method == "POST" and action == "extend":
+        minutes = body_json(event).get("minutes", 60)
+        if not isinstance(minutes, int):
+            raise ContestError("invalid_extension", "Укажи продолжительность продления.")
+        extend_contest(contest, minutes, now)
+    elif method == "PATCH" and action == "review":
+        update_review(contest, body_json(event), now)
+    else:
+        return response(405, {"message": "Метод не поддерживается."}, event)
+    save_contest_or_conflict(contest, etag)
+    return response(200, {"saved": True, "contest": admin_contest_view(contest, application)}, event)
+
+
 def admin_route(event: dict, method: str, path: str) -> dict:
     require_admin(event)
     if method == "GET" and path == "/v1/admin/applications":
-        status = (event.get("queryStringParameters") or {}).get("status")
+        query = event.get("queryStringParameters") or {}
+        status = query.get("status")
+        contest_state = query.get("contestState")
         if status and status not in STATUSES:
             return response(400, {"message": "Неизвестный статус."}, event)
+        if contest_state and contest_state not in CONTEST_STATES and contest_state != "none":
+            return response(400, {"message": "Неизвестный статус контеста."}, event)
         items = repository().list_applications(status)
-        return response(200, {"applications": [public_application(item) for item in items]}, event)
+        contests = {item["application_id"]: item for item in repository().list_contests()}
+        if contest_state:
+            items = [
+                item for item in items
+                if (contest_state == "none" and item["application_id"] not in contests)
+                or contests.get(item["application_id"], {}).get("state") == contest_state
+            ]
+        return response(
+            200,
+            {"applications": [public_application(item, contest=contests.get(item["application_id"])) for item in items]},
+            event,
+        )
+
+    contest_match = re.fullmatch(
+        r"/v1/admin/applications/([0-9a-f-]{36})/contest(?:/(resend|revoke|extend|review))?",
+        path,
+    )
+    if contest_match:
+        application_id, action = contest_match.groups()
+        application = repository().get_application(application_id)
+        if not application or application.get("status") == "deleting":
+            return response(404, {"message": "Заявка не найдена."}, event)
+        return admin_contest_route(event, method, application, action)
 
     match = re.fullmatch(r"/v1/admin/applications/([0-9a-f-]{36})(/resume)?", path)
     if not match:
@@ -263,7 +533,8 @@ def admin_route(event: dict, method: str, path: str) -> dict:
         url = storage().download_url(object_key=application["resume_object_key"], original_name=application["resume_name"])
         return response(200, {"downloadUrl": url, "expiresIn": 60}, event)
     if method == "GET":
-        return response(200, {"application": public_application(application, detail=True)}, event)
+        contest = repository().find_contest_by_application(application_id)
+        return response(200, {"application": public_application(application, detail=True, contest=contest)}, event)
     if method == "PATCH" and not resume_suffix:
         status = body_json(event).get("status")
         if status not in STATUSES:
@@ -273,6 +544,7 @@ def admin_route(event: dict, method: str, path: str) -> dict:
     if method == "DELETE" and not resume_suffix:
         marked = repository().mark_deleting(application_id, datetime.now(timezone.utc))
         if marked:
+            repository().delete_contests_for_application(application_id)
             storage().delete(marked["resume_object_key"])
             repository().purge_application(application_id)
         return response(200, {"deleted": True}, event)
@@ -289,9 +561,24 @@ def api(event, context=None):
             return create_upload(event)
         if method == "POST" and path == "/v1/applications":
             return create_application(event)
+        if method == "POST" and path == "/v1/contest/open":
+            return open_candidate_contest(event)
+        if method == "GET" and path == "/v1/contest":
+            return read_candidate_contest(event)
+        if method == "POST" and path == "/v1/contest/start":
+            return start_candidate_contest(event)
+        answer_match = re.fullmatch(r"/v1/contest/answers/([a-z0-9-]{2,64})", path)
+        if method == "PATCH" and answer_match:
+            return save_candidate_answer(event, answer_match.group(1))
+        if method == "POST" and path == "/v1/contest/run":
+            return run_candidate_tests(event)
+        if method == "POST" and path == "/v1/contest/submit":
+            return submit_candidate_contest(event)
         if path.startswith("/v1/admin/"):
             return admin_route(event, method, path)
         return response(404, {"message": "Не найдено."}, event)
+    except ContestError as error:
+        return response(error.status, {"message": error.message, "code": error.code}, event)
     except ValidationError as error:
         payload = {"message": error.message}
         if error.field_errors:
@@ -324,6 +611,18 @@ def maintenance(event, context=None):
         except Exception:
             continue
 
+    expired = 0
+    for item in repo.list_contests("started") + repo.list_contests("invited") + repo.list_contests("opened"):
+        contest, etag = repo.get_contest_with_etag(item["contest_id"])
+        if not contest or not etag:
+            continue
+        try:
+            if expire_if_due(contest, now):
+                repo.save_contest(contest, etag)
+                expired += 1
+        except ContestConflict:
+            continue
+
     mailer = Mailer()
     delivered = 0
     if mailer.enabled:
@@ -349,4 +648,35 @@ def maintenance(event, context=None):
                 attempts=attempts,
                 next_attempt_at=now + timedelta(minutes=delay_minutes),
             )
-    return {"statusCode": 200, "body": json.dumps({"cleaned": cleaned, "delivered": delivered})}
+
+        for contest in repo.pending_contest_notifications(now):
+            application = repo.get_application(contest["application_id"])
+            if not application or application.get("status") == "deleting":
+                continue
+            invitation_status = contest.get("invitation_notification_status", "not_requested")
+            completion_status = contest.get("completion_notification_status", "not_requested")
+            attempts = int(contest.get("notify_attempts", 0)) + 1
+            try:
+                if invitation_status == "pending":
+                    if application.get("email"):
+                        mailer.send_contest_invitation(application, contest, invite_url(contest))
+                    invitation_status = "sent" if application.get("email") else "not_requested"
+                if completion_status == "pending":
+                    mailer.send_contest_completion(application, contest)
+                    completion_status = "sent"
+                delivered += 1
+            except Exception:
+                pass
+            delay_minutes = min(24 * 60, 5 * (2 ** min(attempts, 8)))
+            repo.update_contest_notifications(
+                contest["contest_id"],
+                invitation_status=invitation_status,
+                completion_status=completion_status,
+                attempts=attempts,
+                next_attempt_at=now + timedelta(minutes=delay_minutes),
+            )
+    cleaned += repo.purge_retained_contests(now)
+    return {
+        "statusCode": 200,
+        "body": json.dumps({"cleaned": cleaned, "expired": expired, "delivered": delivered}),
+    }

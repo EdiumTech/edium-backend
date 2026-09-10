@@ -2,6 +2,7 @@ import re
 from dataclasses import dataclass
 from email.utils import parseaddr
 from urllib.parse import urlparse
+from contest_content import ACTIVE_DIRECTIONS
 
 
 MAX_FILE_SIZE = 10 * 1024 * 1024
@@ -115,7 +116,7 @@ def validate_application(payload: object) -> dict:
         "telegram": normalize_telegram(payload.get("telegram")),
         "phone": normalize_phone(payload.get("phone")),
         "email": valid_email(payload.get("email")) if payload.get("email") else None,
-        "direction": clean_text(payload.get("direction"), maximum=120),
+        "direction": clean_text(payload.get("direction"), maximum=120, required=True),
         "motivation": payload.get("motivation", "").strip() if isinstance(payload.get("motivation"), str) else "",
         "portfolio_url": valid_url(payload.get("portfolioUrl")) if payload.get("portfolioUrl") else None,
     }
@@ -131,6 +132,8 @@ def validate_application(payload: object) -> dict:
         errors["phone"] = "Укажи телефон в международном формате."
     if payload.get("email") and not result["email"]:
         errors["email"] = "Проверь адрес электронной почты."
+    if result["direction"] not in ACTIVE_DIRECTIONS:
+        errors["direction"] = "Выбери направление из списка."
     if not 40 <= len(result["motivation"]) <= 4000:
         errors["motivation"] = "Письмо должно содержать от 40 до 4000 символов."
     if payload.get("portfolioUrl") and not result["portfolio_url"]:
