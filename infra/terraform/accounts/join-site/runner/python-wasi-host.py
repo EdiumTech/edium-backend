@@ -12,6 +12,7 @@ from pathlib import Path
 import sys
 import tempfile
 import threading
+import traceback
 
 PYTHON_WASM_SHA256 = "5ce0cbeb843e6e5abf2d50c7158002e8333c26a40fbe27a7a52e66ee48cf64a8"
 PYTHON_STDLIB_SHA256 = "74130c400ba5b818bf58bfc2f41fc075f4350cbb13e53099c84e9c0494ec5444"
@@ -40,6 +41,7 @@ def main():
     parser.add_argument("--bindings", required=True)
     parser.add_argument("--runtime", required=True)
     parser.add_argument("--job", required=True)
+    parser.add_argument("--diagnostics", action="store_true")
     args = parser.parse_args()
     bindings = Path(args.bindings).resolve(strict=True)
     runtime = Path(args.runtime).resolve(strict=True)
@@ -148,6 +150,8 @@ if __name__ == "__main__":
     try:
         response = main()
     except Exception:
+        if "--diagnostics" in sys.argv:
+            traceback.print_exc(file=sys.stderr)
         # Host failures are infrastructure problems, not a candidate's 0/N.
         # Do not leak local paths or any host data into candidate diagnostics.
         response = {"error": "runtime_unavailable"}

@@ -39,6 +39,7 @@ function boundedHost(executable, args, cwd, input) {
     // user-site customization. No candidate code enters executable arguments.
     const child = spawn(executable, args, { cwd, env: {}, detached: true, stdio: ['pipe', 'pipe', 'pipe'] })
     const stdout = []
+    const stderr = []
     let bytes = 0
     let reason = null
     const kill = (cause) => {
@@ -56,12 +57,16 @@ function boundedHost(executable, args, cwd, input) {
     })
     // Host diagnostics are never forwarded; guest diagnostics are already
     // bounded inside the helper and transmitted in its JSON protocol.
-    child.stderr.on('data', chunk => { bytes += chunk.length; if (bytes > 4 * 1024 * 1024) kill('output_limit') })
+    child.stderr.on('data', chunk => {
+      bytes += chunk.length
+      if (bytes > 4 * 1024 * 1024) kill('output_limit')
+      else stderr.push(chunk)
+    })
     child.stdin.on('error', () => {})
     child.on('error', () => { reason = 'spawn_error' })
     child.on('close', (status) => {
       clearTimeout(timer)
-      resolve({ status, reason, stdout: Buffer.concat(stdout).toString('utf8') })
+      resolve({ status, reason, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8') })
     })
     child.stdin.end(input)
   })
@@ -81,12 +86,20 @@ async function runPython(source, suite, options = {}) {
   if (Buffer.byteLength(input) > MAX_REQUEST_BYTES) throw unavailable()
   const jobDirectory = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'edium-python-job-'))
   try {
-    const execution = await boundedHost(config.hostPython, ['-I', path.join(__dirname, 'python-wasi-host.py'),
-      '--bindings', config.bindingsDirectory, '--runtime', config.runtimeDirectory, '--job', jobDirectory], jobDirectory, input)
-    if (execution.reason || execution.status !== 0) throw unavailable()
+    const helperArgs = ['-I', path.join(__dirname, 'python-wasi-host.py'),
+      '--bindings', config.bindingsDirectory, '--runtime', config.runtimeDirectory, '--job', jobDirectory]
+    if (process.env.EDIUM_RUNTIME_DIAGNOSTICS === '1') helperArgs.push('--diagnostics')
+    const execution = await boundedHost(config.hostPython, helperArgs, jobDirectory, input)
+    if (execution.reason || execution.status !== 0) {
+      if (process.env.EDIUM_RUNTIME_DIAGNOSTICS === '1') process.stderr.write(execution.stderr)
+      throw unavailable()
+    }
     let response
     try { response = JSON.parse(execution.stdout) } catch { throw unavailable() }
-    if (response.error || !Array.isArray(response.results) || response.results.length !== suite.length) throw unavailable()
+    if (response.error || !Array.isArray(response.results) || response.results.length !== suite.length) {
+      if (process.env.EDIUM_RUNTIME_DIAGNOSTICS === '1') process.stderr.write(execution.stderr)
+      throw unavailable()
+    }
     return suite.map((test, index) => {
       const result = response.results[index]
       let passed = false

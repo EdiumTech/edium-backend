@@ -71,6 +71,7 @@ jobs:
             --network none \
             --memory 6g \
             --cpus 3 \
+            --env EDIUM_RUNTIME_DIAGNOSTICS=1 \
             --volume "$GITHUB_WORKSPACE/infra/terraform/accounts/join-site/runner:/checks:ro" \
             --entrypoint node \
             edium-join-runner:ci /checks/container-runtime-smoke.js
