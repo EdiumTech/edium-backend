@@ -32,8 +32,11 @@ print(json.dumps(result, ensure_ascii=False, allow_nan=False, separators=(",", "
 
 
 def digest(filename):
+    checksum = hashlib.sha256()
     with filename.open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            checksum.update(chunk)
+    return checksum.hexdigest()
 
 
 def main():
