@@ -43,7 +43,7 @@ RUN set -eux; \
     tar -xJf /opt/downloads/wasmtime.tar.xz -C /opt/wasmtime --strip-components=1; \
     curl -fL "$PYTHON_WASI_URL" -o /opt/downloads/python-wasi.tar.gz; \
     echo "$PYTHON_WASI_SHA256  /opt/downloads/python-wasi.tar.gz" | sha256sum -c -; \
-    tar -xzf /opt/downloads/python-wasi.tar.gz -C /opt/python-wasi --strip-components=1; \
+    tar -xzf /opt/downloads/python-wasi.tar.gz -C /opt/python-wasi; \
     curl -fL "$WASMTIME_PYTHON_URL" -o /opt/downloads/wasmtime-python.whl; \
     echo "$WASMTIME_PYTHON_SHA256  /opt/downloads/wasmtime-python.whl" | sha256sum -c -; \
     python3 -m zipfile -e /opt/downloads/wasmtime-python.whl /opt/wasmtime-python; \
