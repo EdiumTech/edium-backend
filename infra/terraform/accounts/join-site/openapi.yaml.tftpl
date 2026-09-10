@@ -2,14 +2,15 @@ openapi: 3.0.0
 info:
   title: Edium Join API
   version: 1.0.0
-x-yc-apigateway-cors:
-  origin:
+x-yc-apigateway:
+  cors:
+    origin:
 %{ for origin in allowed_origins ~}
-    - ${origin}
+      - ${origin}
 %{ endfor ~}
-  methods: [GET, POST, PATCH, DELETE, OPTIONS]
-  allowedHeaders: [Content-Type, Authorization, Idempotency-Key]
-  credentials: false
+    methods: [GET, POST, PATCH, DELETE, OPTIONS]
+    allowedHeaders: [Content-Type, Authorization, Idempotency-Key]
+    credentials: false
 paths:
   /v1/uploads:
     post:
