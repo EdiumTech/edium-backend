@@ -173,13 +173,6 @@ resource "yandex_serverless_container" "runner" {
   labels = local.tags
 }
 
-resource "yandex_serverless_container_iam_binding" "runner_invoker" {
-  count        = var.runner_image_url == "" ? 0 : 1
-  container_id = yandex_serverless_container.runner[0].id
-  role         = "serverless-containers.containerInvoker"
-  members      = ["serviceAccount:${yandex_iam_service_account.runtime.id}"]
-}
-
 resource "yandex_api_gateway" "join" {
   name        = "edium-join-api"
   description = "API Gateway for the Edium team application form"

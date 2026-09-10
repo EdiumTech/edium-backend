@@ -107,7 +107,7 @@ paths:
       responses:
         '200': { description: 60-second private download URL }
   /v1/admin/applications/{applicationId}/contest:
-    parameters: &applicationContestParameters
+    parameters:
       - name: applicationId
         in: path
         required: true
@@ -123,28 +123,44 @@ paths:
       responses:
         '201': { description: Personal invitation created }
   /v1/admin/applications/{applicationId}/contest/resend:
-    parameters: *applicationContestParameters
+    parameters:
+      - name: applicationId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
     post:
       operationId: resendContestInvitation
       x-yc-apigateway-integration: *function
       responses:
         '200': { description: Existing invitation queued again }
   /v1/admin/applications/{applicationId}/contest/revoke:
-    parameters: *applicationContestParameters
+    parameters:
+      - name: applicationId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
     post:
       operationId: revokeContestInvitation
       x-yc-apigateway-integration: *function
       responses:
         '200': { description: Invitation revoked }
   /v1/admin/applications/{applicationId}/contest/extend:
-    parameters: *applicationContestParameters
+    parameters:
+      - name: applicationId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
     post:
       operationId: extendContestDeadline
       x-yc-apigateway-integration: *function
       responses:
         '200': { description: Deadline extended once }
   /v1/admin/applications/{applicationId}/contest/review:
-    parameters: *applicationContestParameters
+    parameters:
+      - name: applicationId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
     patch:
       operationId: reviewApplicationContest
       x-yc-apigateway-integration: *function
