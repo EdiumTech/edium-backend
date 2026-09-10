@@ -75,7 +75,13 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.TF_S3_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.TF_S3_SECRET_KEY }}
-        run: terraform apply -parallelism=1 -auto-approve tfplan
+        run: |
+          set -o pipefail
+          terraform apply -parallelism=1 -auto-approve tfplan 2>&1 | tee terraform-apply.log
+          if grep -q "Failed to create version for Yandex Cloud Function" terraform-apply.log; then
+            echo "::error::Yandex provider did not publish a Cloud Function version"
+            exit 1
+          fi
 
       # The Yandex provider currently reports a failed Cloud Function version
       # creation as a warning, so `terraform apply` can exit successfully while
@@ -89,11 +95,6 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.TF_S3_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.TF_S3_SECRET_KEY }}
         run: |
-          maintenance_version="$(terraform output -raw maintenance_function_version)"
-          if [ -z "$maintenance_version" ]; then
-            echo "::error::Maintenance-функция осталась без опубликованной версии"
-            exit 1
-          fi
           set +e
           terraform plan -parallelism=1 -detailed-exitcode -no-color -out=post-apply.tfplan
           verify_exit=$?
@@ -115,4 +116,4 @@ jobs:
 
       - name: Очистка секретных файлов
         if: always()
-        run: rm -f key.json platform.tfvars terraform.tfvars tfplan post-apply.tfplan function.zip
+        run: rm -f key.json platform.tfvars terraform.tfvars tfplan post-apply.tfplan terraform-apply.log function.zip
