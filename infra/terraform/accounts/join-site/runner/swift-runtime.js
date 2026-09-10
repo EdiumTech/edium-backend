@@ -14,7 +14,9 @@ const MAX_WASM_BYTES = 128 * 1024 * 1024
 const MAX_PRECOMPILED_BYTES = 256 * 1024 * 1024
 const MAX_RESULT_BYTES = 262144
 const COMPILE_TIMEOUT_MS = 45000
+const PRECOMPILE_TIMEOUT_MS = 60000
 const TEST_PROCESS_TIMEOUT_MS = 10000
+const SUBMISSION_TIMEOUT_MS = 115000
 const PROCESS_GROUP_RSS_LIMIT = 1536 * 1024 * 1024
 
 // No directories, sockets, inherited environment, or native extension imports
@@ -162,11 +164,12 @@ function stable(value) {
 
 async function runSwift(source, suite, options = {}) {
   if (typeof source !== 'string' || Buffer.byteLength(source) > MAX_SOURCE_BYTES) throw new Error('invalid_source')
-  // Current mobile tasks have seven tests. Revisit the request time budget
-  // before introducing a longer suite: compilation 45s + 7 * 10s < API 119s.
+  // The shared deadline remains below the API-to-runner timeout. Individual
+  // compiler, precompile and test limits are additionally capped by it.
   if (!Array.isArray(suite) || !suite.length || suite.length > 7) throw new Error('unknown_task')
   const config = configuration(options)
-  const compileDeadline = Date.now() + COMPILE_TIMEOUT_MS
+  const submissionDeadline = Date.now() + SUBMISSION_TIMEOUT_MS
+  const compileDeadline = Math.min(submissionDeadline, Date.now() + COMPILE_TIMEOUT_MS)
   const jobDirectory = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'edium-swift-job-'))
   let runtimeDirectory
   try {
@@ -243,7 +246,9 @@ async function runSwift(source, suite, options = {}) {
     fs.writeFileSync(runtimeArtifact, wasm, { flag: 'wx', mode: 0o600 })
     const precompilation = await boundedProcess(config.wasmtimeExecutable,
       ['compile', ...WASMTIME_ENGINE_ARGS, '-o', compiledArtifact, runtimeArtifact], {
-        cwd: runtimeDirectory, env: {}, timeout: 30000, maxBytes: 1024 * 1024, monitorMemory: true,
+        cwd: runtimeDirectory, env: {},
+        timeout: Math.max(1, Math.min(PRECOMPILE_TIMEOUT_MS, submissionDeadline - Date.now())),
+        maxBytes: 1024 * 1024, monitorMemory: true,
       })
     if (precompilation.reason === 'monitor_unavailable' || precompilation.error || precompilation.status !== 0) {
       if (process.env.EDIUM_RUNTIME_DIAGNOSTICS === '1') {
@@ -261,7 +266,9 @@ async function runSwift(source, suite, options = {}) {
     const results = []
     for (const test of suite) {
       const execution = await boundedProcess(config.wasmtimeExecutable, [...WASMTIME_ARGS, '--allow-precompiled', compiledArtifact], {
-        cwd: runtimeDirectory, env: {}, timeout: TEST_PROCESS_TIMEOUT_MS, maxBytes: MAX_RESULT_BYTES,
+        cwd: runtimeDirectory, env: {},
+        timeout: Math.max(1, Math.min(TEST_PROCESS_TIMEOUT_MS, submissionDeadline - Date.now())),
+        maxBytes: MAX_RESULT_BYTES,
         input: JSON.stringify(test.input) + '\n',
       })
       if (process.env.EDIUM_RUNTIME_DIAGNOSTICS === '1' && (execution.reason || execution.status !== 0)) {
