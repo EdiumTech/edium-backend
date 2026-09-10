@@ -1,6 +1,6 @@
 # Local Python WASI runtime
 
-AI/ML candidates use genuine **CPython 3.12.0**, with `def solve(data: dict) -> dict` and the standard library. No pip dependencies, native extensions, network or host filesystem are provided. This is a local-only prototype: Python 3.12.0 is an old vendor build, not an up-to-date production interpreter. The production image remains gated; do not deploy this build as-is.
+AI/ML candidates use genuine **CPython 3.12.0**, with `def solve(data: dict) -> dict` and the standard library. No pip dependencies, native extensions, network or host filesystem are provided. The same immutable WASI interpreter is included in the production image and covered by its container smoke test; upgrading this older vendor build requires a separately pinned and verified replacement.
 
 ## Isolation
 
@@ -8,7 +8,7 @@ AI/ML candidates use genuine **CPython 3.12.0**, with `def solve(data: dict) -> 
 
 The official Wasmtime Python binding compiles the immutable, SHA256-pinned interpreter once per request. Every test gets a fresh Store/instance and input fd. Only `/usr/local/lib` is preopened, with `fs_mutable=False`; it contains the interpreter's stdlib zip and minimal companion files. There is no host-root or job-directory preopen, inherited environment, socket/network grant, native module import, candidate-provided Wasm, or precompiled/native cache deserialization. Expected answers never enter the guest.
 
-Limits: 64 KiB source, at most seven tests, 64 MiB guest linear memory, two billion Wasm fuel units and two seconds per test (including interpreter startup), combined stdout/stderr 256 KiB per test, entire helper 45 seconds, and bounded host protocol output. Timers are canceled and joined before the next test. Output callbacks never raise across the native binding. Host JIT memory is not the guest-memory limit: production still needs separately verified hard OS/container memory/CPU limits and a maintained interpreter.
+Limits: 64 KiB source, at most seven tests, 64 MiB guest linear memory, two billion Wasm fuel units and two seconds per test (including interpreter startup), combined stdout/stderr 256 KiB per test, entire helper 45 seconds, and bounded host protocol output. Timers are canceled and joined before the next test. Output callbacks never raise across the native binding. Host JIT memory is not the guest-memory limit; production additionally applies the serverless container's hard memory, CPU, request-time and concurrency limits.
 
 ## Pinned artifacts
 

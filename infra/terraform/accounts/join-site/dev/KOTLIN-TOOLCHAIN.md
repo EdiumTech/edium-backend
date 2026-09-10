@@ -3,9 +3,9 @@
 The verified local path uses the official Kotlin/JS **2.2.21-release-469** compiler,
 OpenJDK **25.0.2**, and macOS `sandbox-exec`. It compiles `.kt` source, never runs
 candidate JVM code, and sends the resulting standalone JavaScript to QuickJS.
-Linux fails closed with `runtime_unavailable`; no native or unisolated fallback
-is provided. A production Linux compiler sandbox still needs to be provisioned
-and verified before enabling this runtime there.
+The production image uses the same pinned Kotlin compiler with OpenJDK 17 on
+Linux; candidate execution stays inside QuickJS, while the container supplies
+the hard process, CPU and memory boundary.
 
 ## Dependency pin
 

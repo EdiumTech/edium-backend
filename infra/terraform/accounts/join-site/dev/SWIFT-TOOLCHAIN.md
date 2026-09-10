@@ -59,9 +59,10 @@ within its process timeout; Linux production requires an overall OS hard limit.
 
 Before execution, the parent opens the artifact with `O_NOFOLLOW`, requires a
 regular bounded file with the core Wasm header, and copies it into a new private
-runtime directory outside compiler access. Its native compilation cache is
-created only there by trusted Wasmtime; there is no cross-submission cache or
-`--allow-precompiled` input. Each test gets a fresh Wasmtime process, no preopened
+runtime directory outside compiler access. Trusted Wasmtime precompiles that
+copy once per submission and the parent validates the host-owned artifact before
+using `--allow-precompiled`; candidate-provided precompiled input is never accepted.
+Each test gets a fresh Wasmtime process, no preopened
 directories, no inherited environment, no sockets, and piped JSON stdin/stdout.
 Limits: 64 MiB linear memory, 100 million fuel, 750 ms Wasm execution time,
 10 seconds including host JIT work, and 256 KiB output. Foundation initialization
@@ -74,8 +75,8 @@ denial, and refusal to load a candidate-specified external macro. The separate
 native diagnostic uses only synthetic canaries and verifies outside read/write,
 toolchain write, runtime-cache read, network and outside-executable denial.
 
-Linux/production compilation deliberately fails closed. Enabling it requires a
-verified compiler sandbox with kernel-enforced memory/process limits and a
-compatible pinned toolchain image. The local macOS proof does not establish
-that nested namespaces or Landlock are enabled in Yandex Serverless Containers.
-No production Terraform apply is part of this setup.
+The production image uses the official Swift 6.3.1 Jammy toolchain, the same
+pinned WASI SDK and pinned Wasmtime 48.0.1. Candidate execution has the same
+WASI boundaries; the serverless container adds hard memory, CPU, request-time
+and concurrency limits. CI builds this exact Linux image and runs the mobile
+reference suites plus failure diagnostics before an image can be published.
