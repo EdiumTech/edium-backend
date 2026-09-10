@@ -71,6 +71,7 @@ See [local preview instructions](dev/README.md), [Kotlin](dev/KOTLIN-TOOLCHAIN.m
 - A Yandex Cloud service-account key authorized to create these isolated resources.
 - Access to the existing private Terraform state bucket.
 - The existing private Yandex Container Registry and its id in the `YC_REGISTRY_ID` GitHub Environment secret.
+- The runner service account needs `container-registry.images.puller` on that registry; grant it at registry scope rather than allowing the deploy account to edit folder-wide IAM.
 - The site build from `edium-mobile/landing`.
 
 Do not copy values from production service logs into tests. Use only synthetic names, contacts, and resumes.
