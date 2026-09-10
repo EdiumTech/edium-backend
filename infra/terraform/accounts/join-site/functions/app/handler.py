@@ -6,6 +6,7 @@ import os
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlsplit
 
 from botocore.exceptions import ClientError
 
@@ -43,6 +44,17 @@ from validation import STATUSES, ValidationError, validate_application, validate
 
 _repository = None
 _storage = None
+
+
+def request_path(event: dict) -> str:
+    """Return the concrete request path for local and Yandex Gateway events.
+
+    Gateway payload v0.1 puts the matched OpenAPI template in ``path`` and the
+    actual path in ``url``. Newer payloads expose the actual value as
+    ``rawPath``. Prefer both concrete fields before falling back to ``path``.
+    """
+    value = event.get("rawPath") or event.get("url") or event.get("path") or "/"
+    return urlsplit(value).path or "/"
 
 
 def repository() -> Repository:
@@ -553,7 +565,7 @@ def admin_route(event: dict, method: str, path: str) -> dict:
 
 def api(event, context=None):
     method = (event.get("httpMethod") or event.get("requestContext", {}).get("http", {}).get("method") or "GET").upper()
-    path = event.get("path") or event.get("rawPath") or "/"
+    path = request_path(event)
     if method == "OPTIONS":
         return response(204, {}, event)
     try:
