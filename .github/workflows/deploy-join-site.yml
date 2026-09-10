@@ -75,7 +75,30 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.TF_S3_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.TF_S3_SECRET_KEY }}
-        run: terraform apply -auto-approve tfplan
+        run: terraform apply -parallelism=1 -auto-approve tfplan
+
+      # The Yandex provider currently reports a failed Cloud Function version
+      # creation as a warning, so `terraform apply` can exit successfully while
+      # leaving a function without `$latest`. A serialized apply avoids the
+      # API race between the API and maintenance versions; the second plan makes
+      # any swallowed provider warning fail the deployment instead of producing
+      # a misleading green workflow.
+      - name: Проверка состояния после apply
+        if: inputs.apply
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.TF_S3_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.TF_S3_SECRET_KEY }}
+        run: |
+          set +e
+          terraform plan -parallelism=1 -detailed-exitcode -no-color -out=post-apply.tfplan
+          verify_exit=$?
+          set -e
+          if [ "$verify_exit" -eq 2 ]; then
+            echo "::error::Terraform оставил неприменённые изменения после apply"
+            terraform show -no-color post-apply.tfplan
+            exit 1
+          fi
+          exit "$verify_exit"
 
       - name: Результат
         if: inputs.apply
@@ -87,4 +110,4 @@ jobs:
 
       - name: Очистка секретных файлов
         if: always()
-        run: rm -f key.json platform.tfvars terraform.tfvars tfplan function.zip
+        run: rm -f key.json platform.tfvars terraform.tfvars tfplan post-apply.tfplan function.zip
