@@ -53,7 +53,22 @@ def request_path(event: dict) -> str:
     actual path in ``url``. Newer payloads expose the actual value as
     ``rawPath``. Prefer both concrete fields before falling back to ``path``.
     """
-    value = event.get("rawPath") or event.get("url") or event.get("path") or "/"
+    if event.get("rawPath"):
+        return urlsplit(event["rawPath"]).path or "/"
+
+    matched_path = event.get("path") or ""
+    path_parameters = (
+        event.get("pathParameters")
+        or event.get("pathParams")
+        or event.get("params")
+        or {}
+    )
+    for name, value in path_parameters.items():
+        matched_path = matched_path.replace(f"{{{name}}}", str(value))
+    if matched_path and "{" not in matched_path:
+        return urlsplit(matched_path).path or "/"
+
+    value = event.get("url") or matched_path or "/"
     return urlsplit(value).path or "/"
 
 

@@ -237,13 +237,13 @@ class HandlerTests(unittest.TestCase):
         self.assertIn("#invite=", body["contest"]["inviteUrl"])
         self.assertEqual(handler._repository.contest["invitation_notification_status"], "not_requested")
 
-    def test_yandex_v01_dynamic_route_uses_actual_url_instead_of_openapi_template(self):
+    def test_yandex_v01_dynamic_route_expands_openapi_path_parameters(self):
         handler._repository = FakeAdminContestRepository(email=None)
         application_id = self.upload["upload_id"]
         result = handler.api({
             "httpMethod": "POST",
             "path": "/v1/admin/applications/{applicationId}/contest",
-            "url": f"/v1/admin/applications/{application_id}/contest?source=admin",
+            "pathParams": {"applicationId": application_id},
             "headers": {"Authorization": "Bearer test-admin-secret"},
             "body": json.dumps({"durationMinutes": 90, "startWithinDays": 7}),
         })
