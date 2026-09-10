@@ -89,6 +89,11 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.TF_S3_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.TF_S3_SECRET_KEY }}
         run: |
+          maintenance_version="$(terraform output -raw maintenance_function_version)"
+          if [ -z "$maintenance_version" ]; then
+            echo "::error::Maintenance-функция осталась без опубликованной версии"
+            exit 1
+          fi
           set +e
           terraform plan -parallelism=1 -detailed-exitcode -no-color -out=post-apply.tfplan
           verify_exit=$?

@@ -126,7 +126,11 @@ resource "yandex_function" "maintenance" {
   memory             = 512
   execution_timeout  = 60
   service_account_id = yandex_iam_service_account.runtime.id
-  user_hash          = data.archive_file.function.output_base64sha256
+  # Keep the version identity distinct from the API function even though both
+  # use the same archive. This also forces recovery from provider state that was
+  # recorded after CreateVersion failed and left the function without $latest.
+  user_hash = sha256("maintenance:${data.archive_file.function.output_base64sha256}")
+  tags      = []
   environment = {
     RESUME_BUCKET     = yandex_storage_bucket.resumes.bucket
     ALLOWED_ORIGINS   = join(",", var.allowed_origins)

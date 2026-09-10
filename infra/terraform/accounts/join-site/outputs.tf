@@ -8,6 +8,11 @@ output "runner_url" {
   value       = try(yandex_serverless_container.runner[0].url, "")
 }
 
+output "maintenance_function_version" {
+  description = "Published maintenance function version; must never be empty after apply."
+  value       = yandex_function.maintenance.version
+}
+
 output "admin_token" {
   description = "Share only with authorized staff; rotate through Terraform if disclosed."
   value       = random_password.admin_token.result
