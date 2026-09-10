@@ -75,7 +75,14 @@ class MailerTests(unittest.TestCase):
         mailer.send_candidate(self.application())
         request = urlopen.call_args.args[0]
         self.assertTrue(request.headers["Idempotency-key"].endswith(":confirmation"))
-        self.assertEqual(json.loads(request.data)["to"], "anna@example.test")
+        payload = json.loads(request.data)
+        self.assertEqual(payload["to"], "anna@example.test")
+        self.assertEqual(payload["subject"], "Мы получили твою заявку в Edium")
+        self.assertIn("Привет, Анна!", payload["text_body"])
+        self.assertIn("Направление: Дизайн.", payload["text_body"])
+        self.assertIn("Что дальше:", payload["text_body"])
+        self.assertIn("несколько рабочих дней", payload["text_body"])
+        self.assertIn("Команда Edium", payload["text_body"])
 
     def test_disabled_without_api_key(self):
         with mock.patch.dict(os.environ, {"HERALD_API_KEY": ""}):
