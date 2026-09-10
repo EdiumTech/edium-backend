@@ -145,7 +145,6 @@ resource "yandex_function" "maintenance" {
     HERALD_API_KEY    = var.herald_api_key
     CONTEST_TOKEN_KEY = random_password.contest_token_key.result
     CONTEST_URL       = var.contest_url
-    RUNNER_URL        = ""
   }
   content { zip_filename = data.archive_file.function.output_path }
   log_options { min_level = "ERROR" }
