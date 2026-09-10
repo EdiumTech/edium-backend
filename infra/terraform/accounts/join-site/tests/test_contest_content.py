@@ -24,7 +24,7 @@ class ContestContentTests(unittest.TestCase):
         directions = list(ACTIVE_DIRECTIONS)
         versions = [resolve_task_set(direction) for direction in directions]
         self.assertEqual(LANGUAGE, "javascript")
-        self.assertEqual(directions, ["Бэкенд", "Фронтенд", "Мобильная разработка", "AI/ML", "Системная разработка (EdiumBoost)"])
+        self.assertEqual(directions, ["Бэкенд", "Фронтенд", "Мобильная разработка", "AI/ML", "Системная разработка"])
         self.assertEqual(len(set(versions + [TASK_SET_VERSION])), 6)
         all_ids = set()
         for direction, version in zip(directions + ["Общий"], versions + [TASK_SET_VERSION]):
@@ -40,15 +40,16 @@ class ContestContentTests(unittest.TestCase):
             self.assertEqual(resolve_task_set(direction), version)
             self.assertEqual(track_label(version), direction)
         self.assertEqual(track_label("edium-js-2026-09-v2-ai-ml"), "AI/ML")
-        self.assertEqual(resolve_task_set("AI/ML"), "edium-js-2026-09-v3-ai-ml")
+        self.assertEqual(resolve_task_set("AI/ML"), "edium-python-2026-09-v4-ai-ml")
+        self.assertEqual(track_label("edium-js-2026-09-v3-ai-ml"), "AI/ML")
 
-    def test_mobile_assignment_requires_kotlin_and_swift_and_all_other_tracks_use_js(self):
+    def test_active_assignments_use_the_languages_of_their_roles(self):
         mobile = public_tasks(resolve_task_set("Мобильная разработка"))
         self.assertEqual([set(task["languages"]) for task in mobile], [{"kotlin"}, {"swift"}, {"kotlin", "swift"}])
         self.assertEqual([task["defaultLanguage"] for task in mobile], ["kotlin", "swift", "kotlin"])
         for direction in ACTIVE_DIRECTIONS:
             version = resolve_task_set(direction)
-            expected = ["kotlin", "swift"] if direction == "Мобильная разработка" else ["javascript"]
+            expected = {"Бэкенд": ["go"], "AI/ML": ["python"], "Мобильная разработка": ["kotlin", "swift"]}.get(direction, ["javascript"])
             self.assertEqual(supported_languages(version), expected)
             for task in public_tasks(version):
                 self.assertIn(task["defaultLanguage"], task["languages"])
@@ -60,11 +61,23 @@ class ContestContentTests(unittest.TestCase):
                     self.assertTrue(option["starterCode"])
 
     def test_pinned_js_tasks_cannot_gain_unsupported_mobile_languages(self):
-        for version in (LEGACY_TASK_SET_VERSION, "edium-js-2026-09-v2-development", resolve_task_set("Бэкенд")):
+        for version in (LEGACY_TASK_SET_VERSION, "edium-js-2026-09-v2-development", "edium-js-2026-09-v3-backend", "edium-js-2026-09-v3-ai-ml"):
             self.assertEqual(supported_languages(version), ["javascript"])
             for task in public_tasks(version):
                 self.assertEqual(set(task["languages"]), {"javascript"})
                 self.assertEqual(task["defaultLanguage"], "javascript")
+
+    def test_v4_role_assignments_do_not_relabel_or_mutate_the_existing_js_tasks(self):
+        for direction, version, language in [("Бэкенд", "edium-go-2026-09-v4-backend", "go"), ("AI/ML", "edium-python-2026-09-v4-ai-ml", "python")]:
+            self.assertEqual(resolve_task_set(direction), version)
+            self.assertEqual(supported_languages(version), [language])
+            for task in public_tasks(version):
+                self.assertEqual(task["testCount"], 7)
+                self.assertEqual(set(task["languages"]), {language})
+                self.assertEqual(task["defaultLanguage"], language)
+        self.assertEqual(task_ids("edium-js-2026-09-v3-backend"), {"notification-bouncer", "cart-without-drama", "subscription-night-shift"})
+        self.assertEqual(task_ids("edium-go-2026-09-v4-backend"), {"backend-webhook-receipts", "backend-retry-desk", "backend-quota-reservations"})
+        self.assertEqual(task_ids("edium-python-2026-09-v4-ai-ml"), {"ai-dataset-quarantine", "ai-grounded-eval", "ai-rag-context-audit"})
 
     def test_unknown_or_empty_direction_uses_general_tasks(self):
         for direction in (None, "", "  ", "Неизвестное направление"):
@@ -86,6 +99,20 @@ class ContestContentTests(unittest.TestCase):
                         {"input": case["input"], "expected": case["expected"]}
                         for case in full["tests"][:2]
                     ])
+
+    def test_active_tasks_have_structured_candidate_presentations(self):
+        for direction in ACTIVE_DIRECTIONS:
+            for task in public_tasks(resolve_task_set(direction)):
+                statement = task["statement"]
+                self.assertTrue(statement["situation"])
+                self.assertTrue(statement["goal"])
+                self.assertTrue(statement["input"])
+                self.assertTrue(statement["rules"])
+                self.assertTrue(statement["output"])
+                self.assertEqual(len(statement["exampleNotes"]), len(task["publicExamples"]))
+                candidate_copy = json.dumps(task, ensure_ascii=False).lower()
+                self.assertNotIn("ediumboost", candidate_copy)
+                self.assertNotIn("экран boost", candidate_copy)
 
     def test_public_nested_data_is_defensively_copied(self):
         original = public_tasks()

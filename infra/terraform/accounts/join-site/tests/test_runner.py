@@ -18,8 +18,8 @@ class RunnerReportTests(unittest.TestCase):
             os.environ.pop("RUNNER_LANGUAGES", None)
             self.assertEqual(SandboxRunner().supported_languages, {"javascript"})
         for configured, expected in [
-            ("", set()), ("python,KOTLIN,SWIFT", set()), ("kotlin", {"kotlin"}),
-            (" javascript, kotlin, swift, python,kotlin ", {"javascript", "kotlin", "swift"}),
+            ("", set()), ("ruby,KOTLIN,SWIFT", set()), ("kotlin", {"kotlin"}),
+            (" javascript, kotlin, swift, python,go,kotlin ", {"javascript", "kotlin", "swift", "python", "go"}),
         ]:
             with self.subTest(configured=configured), patch.dict(os.environ, {"RUNNER_LANGUAGES": configured}):
                 self.assertEqual(SandboxRunner().supported_languages, expected)
@@ -65,15 +65,23 @@ class RunnerReportTests(unittest.TestCase):
         result = SandboxRunner._sanitize({"tests": [{"passed": True}, {"passed": True}]}, 2)
         self.assertEqual((result["passed"], result["total"], result["allPassed"]), (2, 2, True))
 
-    def test_mobile_language_is_forwarded_and_compile_time_is_included(self):
+    def test_non_js_language_is_forwarded_and_runtime_time_is_included(self):
         runner = SandboxRunner()
         runner.url = "https://runner.example.test/"
-        response = io.BytesIO(json.dumps({"tests": [{"passed": True}] * 7, "durationMs": 12500}).encode())
-        response.status = 200
-        with patch.object(runner, "_iam_token", return_value="synthetic-token"), patch("runner.urllib.request.urlopen", return_value=response) as send:
-            result = runner.run("mobile-permission-panda", "func solve(_ input: [String: Any]) -> [String: Any] { [:] }", "edium-mobile-2026-09-v3", "swift")
-        self.assertEqual(json.loads(send.call_args.args[0].data)["language"], "swift")
-        self.assertEqual((result["passed"], result["total"], result["durationMs"]), (7, 7, 12500))
+        for task, version, language in [
+            ("mobile-permission-panda", "edium-mobile-2026-09-v3", "swift"),
+            ("backend-webhook-receipts", "edium-go-2026-09-v4-backend", "go"),
+            ("ai-dataset-quarantine", "edium-python-2026-09-v4-ai-ml", "python"),
+        ]:
+            with self.subTest(language=language):
+                response = io.BytesIO(json.dumps({"tests": [{"passed": True}] * 7, "durationMs": 12500}).encode())
+                response.status = 200
+                with patch.object(runner, "_iam_token", return_value="synthetic-token"), patch("runner.urllib.request.urlopen", return_value=response) as send:
+                    result = runner.run(task, "candidate source", version, language)
+                payload = json.loads(send.call_args.args[0].data)
+                self.assertEqual(payload["language"], language)
+                self.assertEqual(payload["taskSetVersion"], version)
+                self.assertEqual((result["passed"], result["total"], result["durationMs"]), (7, 7, 12500))
 
 
 if __name__ == "__main__":

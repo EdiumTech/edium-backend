@@ -20,7 +20,7 @@ def main():
     if args.tracks:
         links = [item for item in links if item["slug"] in args.tracks]
     references = json.loads(subprocess.check_output(
-        ["node", "-e", "const js=require('./task-reference-solutions.testdata').referenceSolutions; const native=require('./mobile-reference-solutions.testdata').mobileReferenceSolutions; process.stdout.write(JSON.stringify({...Object.fromEntries(Object.entries(js).map(([id,solve])=>[id,{javascript:solve.toString()}])),...native}))"],
+        ["node", "-e", "const js=require('./task-reference-solutions.testdata').referenceSolutions; const native=require('./mobile-reference-solutions.testdata').mobileReferenceSolutions; const roles=require('./role-reference-solutions.testdata').roleReferenceSolutions; process.stdout.write(JSON.stringify({...Object.fromEntries(Object.entries(js).map(([id,solve])=>[id,{javascript:solve.toString()}])),...native,...roles}))"],
         cwd=ROOT / "runner", text=True,
     ))
 
@@ -37,7 +37,7 @@ def main():
     request("GET", "/v1/admin/applications", expected=401)
     applications = request("GET", "/v1/admin/applications", admin=True)["applications"]
     assert len(applications) == 6
-    assert [item[0] for item in DEMO_DIRECTIONS] == ["backend", "frontend", "mobile", "ai", "boost"]
+    assert [item[0] for item in DEMO_DIRECTIONS] == ["backend", "frontend", "mobile", "ai", "systems"]
     versions = set()
     reference_task = None
     total_tests = 0
@@ -47,8 +47,9 @@ def main():
         opened = request("POST", "/v1/contest/open", token=token)["contest"]
         assert opened["state"] == "opened"
         current = request("POST", "/v1/contest/start", token=token)["contest"]
-        assert current["languages"] == (["kotlin", "swift"] if item["slug"] == "mobile" else ["javascript"])
-        assert current["language"] == ("mixed" if item["slug"] == "mobile" else "javascript")
+        expected_languages = {"mobile": ["kotlin", "swift"], "backend": ["go"], "ai": ["python"]}.get(item["slug"], ["javascript"])
+        assert current["languages"] == expected_languages
+        assert current["language"] == ("mixed" if len(expected_languages) > 1 else expected_languages[0])
         assert current["taskSetVersion"] not in versions
         versions.add(current["taskSetVersion"])
 
@@ -62,7 +63,7 @@ def main():
         if item["slug"] == "mobile":
             assert [list(task["languages"]) for task in tasks] == [["kotlin"], ["swift"], ["kotlin", "swift"]]
         for task in tasks:
-            wrong_language = "javascript" if item["slug"] == "mobile" else "kotlin"
+            wrong_language = "javascript" if "javascript" not in task["languages"] else "python"
             for method, path in [("POST", "/v1/contest/run"), ("PATCH", f"/v1/contest/answers/{task['id']}")]:
                 invalid = request(method, path, {
                     "taskId": task["id"], "source": "irrelevant", "language": wrong_language, "revision": current["revision"],

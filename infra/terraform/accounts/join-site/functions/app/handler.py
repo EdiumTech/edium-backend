@@ -33,7 +33,7 @@ from contest import (
     utcnow,
     validate_source,
 )
-from contest_content import public_tasks, task_ids, track_label
+from contest_content import ACTIVE_DIRECTIONS, public_tasks, task_ids, track_label
 from mailer import Mailer
 from repository import ContestConflict, Repository
 from runner import RunnerUnavailable, SandboxRunner
@@ -432,17 +432,27 @@ def admin_contest_route(event: dict, method: str, application: dict, action: str
         payload = body_json(event)
         duration = payload.get("durationMinutes", 90)
         start_within_days = payload.get("startWithinDays", 7)
+        requested_direction = payload.get("direction")
         if not isinstance(duration, int) or not isinstance(start_within_days, int) or start_within_days < 1 or start_within_days > 30:
             raise ContestError("invalid_invitation", "Проверь продолжительность и срок начала.")
+        if requested_direction is not None and (
+            not isinstance(requested_direction, str) or requested_direction not in ACTIVE_DIRECTIONS
+        ):
+            raise ContestError("invalid_direction", "Выбери доступный набор задач.")
+        # Older admin clients did not send a direction. Keep their behaviour for
+        # compatibility, while the current UI assigns the task set explicitly.
+        contest_direction = requested_direction or application.get("direction")
         contest, _ = new_contest(
             application["application_id"], duration, now + timedelta(days=start_within_days), now,
-            direction=application.get("direction"),
+            direction=contest_direction,
         )
         required_native_languages = set(candidate_view(contest)["languages"]) - {"javascript"}
         if required_native_languages and not required_native_languages.issubset(SandboxRunner().supported_languages):
+            language_labels = {"kotlin": "Kotlin", "swift": "Swift", "python": "Python", "go": "Go"}
+            required_labels = " и ".join(language_labels[language] for language in sorted(required_native_languages))
             raise ContestError(
                 "runtime_unavailable",
-                "Мобильный контест пока недоступен: сначала настройте изолированный запуск Kotlin и Swift.",
+                f"Контест пока недоступен: сначала настройте изолированный запуск {required_labels}.",
                 503,
             )
         attach_token_hash(contest, os.environ["CONTEST_TOKEN_KEY"])

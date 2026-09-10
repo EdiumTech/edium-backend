@@ -30,7 +30,7 @@ DEMO_DIRECTIONS = [
     ("frontend", "Фронтенд", "Саша"),
     ("mobile", "Мобильная разработка", "Оля"),
     ("ai", "AI/ML", "Марк"),
-    ("boost", "Системная разработка (EdiumBoost)", "Лена"),
+    ("systems", "Системная разработка", "Лена"),
 ]
 
 
@@ -176,7 +176,7 @@ def configure_runner(api):
         def supported_languages(self):
             # Preview invitations can expose both mobile editors before the
             # local toolchains are installed. Execution still fails explicitly.
-            return {"javascript", "kotlin", "swift"}
+            return {"javascript", "kotlin", "swift", "python", "go"}
 
         def run(self, task_id, source, task_set_version, language="javascript"):
             if not slots.acquire(blocking=False):
@@ -240,7 +240,7 @@ def make_demo(port=8787):
             continue
         result = api.api(api_event(
             "POST", f"/v1/admin/applications/{application_id}/contest",
-            {"durationMinutes": 90, "startWithinDays": 7},
+            {"direction": direction, "durationMinutes": 90, "startWithinDays": 7},
             {"Authorization": f"Bearer {ADMIN_KEY}"},
         ))
         if result["statusCode"] != 201:
@@ -254,13 +254,13 @@ def make_demo(port=8787):
 
 def demo_index(links):
     captions = {
-        "backend": "Пуши, купоны и подписки. Пусть сервер переживёт ещё один понедельник.",
+        "backend": "Вебхуки, сбои сервиса и квоты. Пусть сервер переживёт ещё один понедельник.",
         "frontend": "Карточки, контраст и длинные кнопки. Сделай интерфейс удобным для людей.",
         "mobile": "Офлайн-синхронизация, разрешения и загрузки. Kotlin и Swift пригодятся оба.",
-        "ai": "Помоги искусственному интеллекту подружиться со здравым смыслом.",
-        "boost": "ПО устройства, интерфейсы и интеграции с железом: кнопки, умный дом и экран Boost.",
+        "ai": "Датасеты, проверка ответов и контекст для AI. Помоги модели подружиться с реальностью.",
+        "systems": "Кнопки устройств, очереди команд и информационные экраны. Железо тоже иногда устраивает понедельник.",
     }
-    language_labels = {"javascript": "JavaScript", "kotlin": "Kotlin", "swift": "Swift"}
+    language_labels = {"javascript": "JavaScript", "kotlin": "Kotlin", "swift": "Swift", "python": "Python", "go": "Go"}
     cards = []
     for index, item in enumerate(links, 1):
         cards.append(
@@ -317,7 +317,7 @@ def demo_index(links):
   <div class="shell">
     <header><div class="brand"><span class="brand-icon" aria-hidden="true">e</span>edium</div><span class="preview">Локальное демо</span></header>
     <main>
-      <section class="hero" aria-labelledby="page-title"><p class="eyebrow">5 направлений · JavaScript, Kotlin и Swift</p><h1 id="page-title">Рабочие будни.<br>Только чуть смешнее.</h1><p>Выбери направление и попробуй себя в команде Edium. Прикладные задачи, немного рабочего абсурда и все тесты сразу.</p></section>
+      <section class="hero" aria-labelledby="page-title"><p class="eyebrow">5 направлений · разные языки и задачи</p><h1 id="page-title">Рабочие будни.<br>Только чуть смешнее.</h1><p>Выбери направление и попробуй себя в команде Edium. Прикладные задачи, немного рабочего абсурда и все тесты сразу.</p></section>
       <section class="tracks" aria-label="Выбери направление">{"".join(cards)}</section>
       <section class="admin" aria-labelledby="admin-title"><div><h2 id="admin-title">Посмотреть со стороны команды</h2><p>Заявки, приглашения и решения кандидатов. Ключ для входа: <code>{ADMIN_KEY}</code></p></div><a class="admin-button" href="{FRONTEND}/join/admin/">Открыть HR-раздел ↗</a></section>
     </main>

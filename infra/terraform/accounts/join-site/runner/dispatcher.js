@@ -15,8 +15,8 @@ function runtime(modulePath) {
   try {
     return require(modulePath)
   } catch (error) {
-    // JS-only deployments must explicitly refuse mobile execution, not interpret
-    // Kotlin or Swift as JavaScript or fabricate a successful report.
+    // JS-only deployments must explicitly refuse unavailable languages, not
+    // interpret other languages as JavaScript or fabricate a successful report.
     if (error.code === 'MODULE_NOT_FOUND') throw unavailable()
     throw error
   }
@@ -35,9 +35,14 @@ async function runSubmission(taskId, source, taskSetVersion = LEGACY_TASK_SET_VE
       const result = await runCompiledTask(taskId, compiled, taskSetVersion)
       return { ...result, durationMs: Date.now() - started }
     }
-    if (language === 'swift') {
-      const tests = await runtime('./swift-runtime').runSwift(source, task.tests)
-      if (!Array.isArray(tests) || tests.length !== task.tests.length || tests.some(test => typeof test.passed !== 'boolean')) {
+    if (['swift', 'python', 'go'].includes(language)) {
+      const [modulePath, method] = {
+        swift: ['./swift-runtime', 'runSwift'],
+        python: ['./python-runtime', 'runPython'],
+        go: ['./go-runtime', 'runGo'],
+      }[language]
+      const tests = await runtime(modulePath)[method](source, task.tests)
+      if (!Array.isArray(tests) || tests.length !== task.tests.length || tests.some(test => !test || typeof test.passed !== 'boolean')) {
         throw new Error('incomplete_runner_response')
       }
       const passed = tests.filter(test => test.passed).length

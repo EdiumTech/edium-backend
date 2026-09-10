@@ -12,9 +12,10 @@ ACTIVE_DIRECTIONS = (
     "Фронтенд",
     "Мобильная разработка",
     "AI/ML",
-    "Системная разработка (EdiumBoost)",
+    "Системная разработка",
 )
 _CATALOG = json.loads(Path(__file__).with_name("contest_catalog.json").read_text(encoding="utf-8"))
+_PRESENTATIONS = json.loads(Path(__file__).with_name("contest_presentations.json").read_text(encoding="utf-8"))
 _SETS = _CATALOG["sets"]
 _DIRECTION_VERSIONS = {
     entry["direction"]: version
@@ -24,10 +25,12 @@ _DIRECTION_VERSIONS = {
 # Previously saved applications may still use a retired direction. Their v2
 # assignments remain available, while all new forms accept ACTIVE_DIRECTIONS.
 _DIRECTION_VERSIONS.update({
-    "Бэкенд": "edium-js-2026-09-v3-backend",
+    "Бэкенд": "edium-go-2026-09-v4-backend",
     "Фронтенд": "edium-js-2026-09-v3-frontend",
     "Мобильная разработка": "edium-mobile-2026-09-v3",
-    "AI/ML": "edium-js-2026-09-v3-ai-ml",
+    "AI/ML": "edium-python-2026-09-v4-ai-ml",
+    "Системная разработка": "edium-js-2026-09-v3-boost",
+    # Compatibility for applications saved before the public direction was renamed.
     "Системная разработка (EdiumBoost)": "edium-js-2026-09-v3-boost",
 })
 
@@ -44,7 +47,8 @@ def _task_set(version: str) -> dict:
 
 
 def track_label(version: str = TASK_SET_VERSION) -> str:
-    return _task_set(version)["direction"]
+    label = _task_set(version)["direction"]
+    return "Системная разработка" if label == "Системная разработка (EdiumBoost)" else label
 
 
 def supported_languages(version: str = TASK_SET_VERSION) -> list[str]:
@@ -76,6 +80,11 @@ def public_tasks(version: str = TASK_SET_VERSION) -> list[dict]:
         default = public["languages"][public["defaultLanguage"]]
         public.setdefault("signature", default["signature"])
         public.setdefault("starterCode", default["starterCode"])
+        if task["id"] in _PRESENTATIONS:
+            public["statement"] = deepcopy(_PRESENTATIONS[task["id"]])
+            # Keep upgraded and older clients free of retired product copy.
+            public["summary"] = public["statement"]["situation"]
+            public["description"] = public["statement"]["goal"]
         result.append(public)
     return result
 

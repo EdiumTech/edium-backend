@@ -1,6 +1,2183 @@
 {
   "schemaVersion": 1,
   "sets": {
+    "edium-go-2026-09-v4-backend": {
+      "direction": "Бэкенд",
+      "languages": [
+        "go"
+      ],
+      "tasks": [
+        {
+          "id": "backend-webhook-receipts",
+          "title": "Вебхук принёс деньги. И ещё раз те же деньги",
+          "summary": "Реализуй обработчик платёжных событий с квитанциями: повторная доставка не должна пополнять баланс второй раз.",
+          "description": "В input есть неотрицательный целый balance и events в порядке получения. Каждое событие может оказаться любым JSON-значением. Событие валидно только если это объект с непустой строкой id, kind='credit' или 'debit', положительным целым числом amount (boolean не число) и signed=true. signed моделирует уже выполненную проверку подписи; криптография здесь не нужна. Сначала валидируй: невалидное событие даёт {index,id:null,status:'invalid'} и не занимает id. index — индекс события с нуля. Для валидного события повтор уже обработанного id даёт status='duplicate'. Первый валидный id запоминается даже при отказе: debit больше баланса даёт status='insufficient', без изменения баланса. Иначе прибавь credit или вычти debit, status='applied'. Квитанции валидных событий содержат их строковый id. Верни {balance,receipts} в порядке доставки. Поля сверх перечисленных игнорируй; все конечные числа во входе укладываются в signed 32-bit. Все массивы содержат не более 1000 элементов; целые значения и промежуточные суммы/произведения укладываются в signed 32-bit. Не изменяй входные данные. В Go JSON-числа имеют тип float64, объекты map[string]any, массивы []any; верни объект из Solve, без main().",
+          "defaultLanguage": "go",
+          "languages": {
+            "go": {
+              "label": "Go",
+              "signature": "func Solve(input map[string]any) map[string]any",
+              "starterCode": "package main\n\nfunc Solve(input map[string]any) map[string]any {\n    return map[string]any{\"balance\": input[\"balance\"], \"receipts\": []any{}}\n}\n"
+            }
+          },
+          "publicExampleCount": 2,
+          "tests": [
+            {
+              "name": "кредит списание и повтор не удваивают деньги",
+              "input": {
+                "balance": 10,
+                "events": [
+                  {
+                    "id": "c",
+                    "kind": "credit",
+                    "amount": 5,
+                    "signed": true
+                  },
+                  {
+                    "id": "d",
+                    "kind": "debit",
+                    "amount": 3,
+                    "signed": true
+                  },
+                  {
+                    "id": "c",
+                    "kind": "credit",
+                    "amount": 5,
+                    "signed": true
+                  }
+                ]
+              },
+              "expected": {
+                "balance": 12,
+                "receipts": [
+                  {
+                    "index": 0,
+                    "id": "c",
+                    "status": "applied"
+                  },
+                  {
+                    "index": 1,
+                    "id": "d",
+                    "status": "applied"
+                  },
+                  {
+                    "index": 2,
+                    "id": "c",
+                    "status": "duplicate"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "плохая подпись не отравляет id будущего события",
+              "input": {
+                "balance": 0,
+                "events": [
+                  {
+                    "id": "a",
+                    "kind": "credit",
+                    "amount": 4,
+                    "signed": false
+                  },
+                  {
+                    "id": "a",
+                    "kind": "credit",
+                    "amount": 4,
+                    "signed": true
+                  }
+                ]
+              },
+              "expected": {
+                "balance": 4,
+                "receipts": [
+                  {
+                    "index": 0,
+                    "id": null,
+                    "status": "invalid"
+                  },
+                  {
+                    "index": 1,
+                    "id": "a",
+                    "status": "applied"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "отказ тоже идемпотентен после пополнения",
+              "input": {
+                "balance": 2,
+                "events": [
+                  {
+                    "id": "d",
+                    "kind": "debit",
+                    "amount": 5,
+                    "signed": true
+                  },
+                  {
+                    "id": "c",
+                    "kind": "credit",
+                    "amount": 10,
+                    "signed": true
+                  },
+                  {
+                    "id": "d",
+                    "kind": "debit",
+                    "amount": 5,
+                    "signed": true
+                  }
+                ]
+              },
+              "expected": {
+                "balance": 12,
+                "receipts": [
+                  {
+                    "index": 0,
+                    "id": "d",
+                    "status": "insufficient"
+                  },
+                  {
+                    "index": 1,
+                    "id": "c",
+                    "status": "applied"
+                  },
+                  {
+                    "index": 2,
+                    "id": "d",
+                    "status": "duplicate"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "повреждённые объекты дают квитанции а не падение",
+              "input": {
+                "balance": 0,
+                "events": [
+                  null,
+                  {},
+                  {
+                    "id": "",
+                    "kind": "credit",
+                    "amount": 1,
+                    "signed": true
+                  },
+                  {
+                    "id": "a",
+                    "kind": "refund",
+                    "amount": 1,
+                    "signed": true
+                  },
+                  {
+                    "id": "b",
+                    "kind": "credit",
+                    "amount": 1,
+                    "signed": "yes"
+                  },
+                  {
+                    "id": "c",
+                    "kind": "credit",
+                    "amount": 1,
+                    "signed": true
+                  }
+                ]
+              },
+              "expected": {
+                "balance": 1,
+                "receipts": [
+                  {
+                    "index": 0,
+                    "id": null,
+                    "status": "invalid"
+                  },
+                  {
+                    "index": 1,
+                    "id": null,
+                    "status": "invalid"
+                  },
+                  {
+                    "index": 2,
+                    "id": null,
+                    "status": "invalid"
+                  },
+                  {
+                    "index": 3,
+                    "id": null,
+                    "status": "invalid"
+                  },
+                  {
+                    "index": 4,
+                    "id": null,
+                    "status": "invalid"
+                  },
+                  {
+                    "index": 5,
+                    "id": "c",
+                    "status": "applied"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "ноль отрицательные дробные и boolean суммы недопустимы",
+              "input": {
+                "balance": 0,
+                "events": [
+                  {
+                    "id": "a",
+                    "kind": "credit",
+                    "amount": 0,
+                    "signed": true
+                  },
+                  {
+                    "id": "a",
+                    "kind": "credit",
+                    "amount": -1,
+                    "signed": true
+                  },
+                  {
+                    "id": "a",
+                    "kind": "credit",
+                    "amount": 1.5,
+                    "signed": true
+                  },
+                  {
+                    "id": "a",
+                    "kind": "credit",
+                    "amount": true,
+                    "signed": true
+                  },
+                  {
+                    "id": "a",
+                    "kind": "credit",
+                    "amount": 3,
+                    "signed": true
+                  }
+                ]
+              },
+              "expected": {
+                "balance": 3,
+                "receipts": [
+                  {
+                    "index": 0,
+                    "id": null,
+                    "status": "invalid"
+                  },
+                  {
+                    "index": 1,
+                    "id": null,
+                    "status": "invalid"
+                  },
+                  {
+                    "index": 2,
+                    "id": null,
+                    "status": "invalid"
+                  },
+                  {
+                    "index": 3,
+                    "id": null,
+                    "status": "invalid"
+                  },
+                  {
+                    "index": 4,
+                    "id": "a",
+                    "status": "applied"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "списание ровно остатка разрешено и порядок важен",
+              "input": {
+                "balance": 10,
+                "events": [
+                  {
+                    "id": "a",
+                    "kind": "debit",
+                    "amount": 10,
+                    "signed": true
+                  },
+                  {
+                    "id": "b",
+                    "kind": "credit",
+                    "amount": 2,
+                    "signed": true
+                  },
+                  {
+                    "id": "c",
+                    "kind": "debit",
+                    "amount": 2,
+                    "signed": true
+                  }
+                ]
+              },
+              "expected": {
+                "balance": 0,
+                "receipts": [
+                  {
+                    "index": 0,
+                    "id": "a",
+                    "status": "applied"
+                  },
+                  {
+                    "index": 1,
+                    "id": "b",
+                    "status": "applied"
+                  },
+                  {
+                    "index": 2,
+                    "id": "c",
+                    "status": "applied"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "пустая пачка сохраняет баланс",
+              "input": {
+                "balance": 7,
+                "events": []
+              },
+              "expected": {
+                "balance": 7,
+                "receipts": []
+              }
+            }
+          ]
+        },
+        {
+          "id": "backend-retry-desk",
+          "title": "Сервис попросил «попробуйте попозже». Насколько попозже?",
+          "summary": "Напиши политику повторов запроса к соседнему сервису: не повторяй опасный POST и не игнорируй Retry-After.",
+          "description": "input содержит целые now, baseDelay, maxDelay, maxAttempts и budgetUntil: время/задержки неотрицательные, maxAttempts>=1, budgetUntil>=now. results — журнал ответов; у каждого уникальный id, method из GET/PUT/DELETE/POST, boolean idempotencyKey, attempt>=1, status (целое HTTP-число или null), error (строка или null), retryAfter (неотрицательное целое или null). Если error не null, он важнее HTTP: timeout/reset временные, любой другой — постоянный. Без error статусы 200..299 успешны, 408/429/500/502/503/504 временные, остальные постоянные. Успех: {action:'done',reason:'success',nextAt:null}; постоянная ошибка: failed/permanent/null. Для временной ошибки правила строго по порядку: POST без idempotencyKey → manual/unsafe; attempt>=maxAttempts → failed/attempts; затем вычисли delay: retryAfter если он не null, иначе min(maxDelay,baseDelay*attempt). delay>maxDelay → failed/wait_limit; now+delay>budgetUntil → failed/budget; иначе retry/transient с nextAt=now+delay. Для любого отказа nextAt=null. Верни {decisions:[{id,action,reason,nextAt}]} в исходном порядке. Реальных HTTP-запросов не делай. Все массивы содержат не более 1000 элементов; целые значения и промежуточные суммы/произведения укладываются в signed 32-bit. Не изменяй входные данные. В Go JSON-числа имеют тип float64, объекты map[string]any, массивы []any; верни объект из Solve, без main().",
+          "defaultLanguage": "go",
+          "languages": {
+            "go": {
+              "label": "Go",
+              "signature": "func Solve(input map[string]any) map[string]any",
+              "starterCode": "package main\n\nfunc Solve(input map[string]any) map[string]any {\n    return map[string]any{\"decisions\": []any{}}\n}\n"
+            }
+          },
+          "publicExampleCount": 2,
+          "tests": [
+            {
+              "name": "успешные ответы и постоянные ошибки не повторяются",
+              "input": {
+                "now": 100,
+                "baseDelay": 2,
+                "maxDelay": 20,
+                "maxAttempts": 3,
+                "budgetUntil": 120,
+                "results": [
+                  {
+                    "id": "ok",
+                    "method": "GET",
+                    "idempotencyKey": false,
+                    "attempt": 1,
+                    "status": 204,
+                    "error": null,
+                    "retryAfter": null
+                  },
+                  {
+                    "id": "bad",
+                    "method": "GET",
+                    "idempotencyKey": false,
+                    "attempt": 1,
+                    "status": 400,
+                    "error": null,
+                    "retryAfter": null
+                  }
+                ]
+              },
+              "expected": {
+                "decisions": [
+                  {
+                    "id": "ok",
+                    "action": "done",
+                    "reason": "success",
+                    "nextAt": null
+                  },
+                  {
+                    "id": "bad",
+                    "action": "failed",
+                    "reason": "permanent",
+                    "nextAt": null
+                  }
+                ]
+              }
+            },
+            {
+              "name": "ошибка транспорта имеет приоритет над HTTP",
+              "input": {
+                "now": 100,
+                "baseDelay": 2,
+                "maxDelay": 20,
+                "maxAttempts": 3,
+                "budgetUntil": 120,
+                "results": [
+                  {
+                    "id": "server",
+                    "method": "GET",
+                    "idempotencyKey": false,
+                    "attempt": 1,
+                    "status": 503,
+                    "error": null,
+                    "retryAfter": null
+                  },
+                  {
+                    "id": "timeout",
+                    "method": "GET",
+                    "idempotencyKey": false,
+                    "attempt": 1,
+                    "status": 200,
+                    "error": "timeout",
+                    "retryAfter": null
+                  },
+                  {
+                    "id": "tls",
+                    "method": "GET",
+                    "idempotencyKey": false,
+                    "attempt": 1,
+                    "status": 503,
+                    "error": "tls",
+                    "retryAfter": null
+                  }
+                ]
+              },
+              "expected": {
+                "decisions": [
+                  {
+                    "id": "server",
+                    "action": "retry",
+                    "reason": "transient",
+                    "nextAt": 102
+                  },
+                  {
+                    "id": "timeout",
+                    "action": "retry",
+                    "reason": "transient",
+                    "nextAt": 102
+                  },
+                  {
+                    "id": "tls",
+                    "action": "failed",
+                    "reason": "permanent",
+                    "nextAt": null
+                  }
+                ]
+              }
+            },
+            {
+              "name": "POST требует ключ даже если лимит попыток уже исчерпан",
+              "input": {
+                "now": 100,
+                "baseDelay": 2,
+                "maxDelay": 20,
+                "maxAttempts": 3,
+                "budgetUntil": 120,
+                "results": [
+                  {
+                    "id": "unsafe",
+                    "method": "POST",
+                    "idempotencyKey": false,
+                    "attempt": 3,
+                    "status": 503,
+                    "error": null,
+                    "retryAfter": null
+                  },
+                  {
+                    "id": "safe",
+                    "method": "POST",
+                    "idempotencyKey": true,
+                    "attempt": 1,
+                    "status": 503,
+                    "error": null,
+                    "retryAfter": null
+                  },
+                  {
+                    "id": "put",
+                    "method": "PUT",
+                    "idempotencyKey": false,
+                    "attempt": 1,
+                    "status": 503,
+                    "error": "reset",
+                    "retryAfter": null
+                  }
+                ]
+              },
+              "expected": {
+                "decisions": [
+                  {
+                    "id": "unsafe",
+                    "action": "manual",
+                    "reason": "unsafe",
+                    "nextAt": null
+                  },
+                  {
+                    "id": "safe",
+                    "action": "retry",
+                    "reason": "transient",
+                    "nextAt": 102
+                  },
+                  {
+                    "id": "put",
+                    "action": "retry",
+                    "reason": "transient",
+                    "nextAt": 102
+                  }
+                ]
+              }
+            },
+            {
+              "name": "последняя попытка и неподдерживаемый HTTP статус",
+              "input": {
+                "now": 100,
+                "baseDelay": 2,
+                "maxDelay": 20,
+                "maxAttempts": 3,
+                "budgetUntil": 120,
+                "results": [
+                  {
+                    "id": "last",
+                    "method": "GET",
+                    "idempotencyKey": false,
+                    "attempt": 3,
+                    "status": 503,
+                    "error": null,
+                    "retryAfter": 99
+                  },
+                  {
+                    "id": "unsupported",
+                    "method": "GET",
+                    "idempotencyKey": false,
+                    "attempt": 1,
+                    "status": 501,
+                    "error": null,
+                    "retryAfter": null
+                  },
+                  {
+                    "id": "rate",
+                    "method": "GET",
+                    "idempotencyKey": false,
+                    "attempt": 2,
+                    "status": 429,
+                    "error": null,
+                    "retryAfter": null
+                  }
+                ]
+              },
+              "expected": {
+                "decisions": [
+                  {
+                    "id": "last",
+                    "action": "failed",
+                    "reason": "attempts",
+                    "nextAt": null
+                  },
+                  {
+                    "id": "unsupported",
+                    "action": "failed",
+                    "reason": "permanent",
+                    "nextAt": null
+                  },
+                  {
+                    "id": "rate",
+                    "action": "retry",
+                    "reason": "transient",
+                    "nextAt": 104
+                  }
+                ]
+              }
+            },
+            {
+              "name": "нулевой Retry-After не заменяется стандартной задержкой",
+              "input": {
+                "now": 100,
+                "baseDelay": 15,
+                "maxDelay": 20,
+                "maxAttempts": 3,
+                "budgetUntil": 120,
+                "results": [
+                  {
+                    "id": "zero",
+                    "method": "GET",
+                    "idempotencyKey": false,
+                    "attempt": 1,
+                    "status": 503,
+                    "error": null,
+                    "retryAfter": 0
+                  },
+                  {
+                    "id": "seven",
+                    "method": "GET",
+                    "idempotencyKey": false,
+                    "attempt": 1,
+                    "status": 503,
+                    "error": null,
+                    "retryAfter": 7
+                  },
+                  {
+                    "id": "capped",
+                    "method": "GET",
+                    "idempotencyKey": false,
+                    "attempt": 2,
+                    "status": 503,
+                    "error": null,
+                    "retryAfter": null
+                  }
+                ]
+              },
+              "expected": {
+                "decisions": [
+                  {
+                    "id": "zero",
+                    "action": "retry",
+                    "reason": "transient",
+                    "nextAt": 100
+                  },
+                  {
+                    "id": "seven",
+                    "action": "retry",
+                    "reason": "transient",
+                    "nextAt": 107
+                  },
+                  {
+                    "id": "capped",
+                    "action": "retry",
+                    "reason": "transient",
+                    "nextAt": 120
+                  }
+                ]
+              }
+            },
+            {
+              "name": "граница бюджета включена но слишком долго ждать нельзя",
+              "input": {
+                "now": 100,
+                "baseDelay": 2,
+                "maxDelay": 20,
+                "maxAttempts": 3,
+                "budgetUntil": 110,
+                "results": [
+                  {
+                    "id": "long",
+                    "method": "GET",
+                    "idempotencyKey": false,
+                    "attempt": 1,
+                    "status": 503,
+                    "error": null,
+                    "retryAfter": 21
+                  },
+                  {
+                    "id": "edge",
+                    "method": "GET",
+                    "idempotencyKey": false,
+                    "attempt": 1,
+                    "status": 503,
+                    "error": null,
+                    "retryAfter": 10
+                  },
+                  {
+                    "id": "late",
+                    "method": "GET",
+                    "idempotencyKey": false,
+                    "attempt": 1,
+                    "status": 503,
+                    "error": null,
+                    "retryAfter": 11
+                  }
+                ]
+              },
+              "expected": {
+                "decisions": [
+                  {
+                    "id": "long",
+                    "action": "failed",
+                    "reason": "wait_limit",
+                    "nextAt": null
+                  },
+                  {
+                    "id": "edge",
+                    "action": "retry",
+                    "reason": "transient",
+                    "nextAt": 110
+                  },
+                  {
+                    "id": "late",
+                    "action": "failed",
+                    "reason": "budget",
+                    "nextAt": null
+                  }
+                ]
+              }
+            },
+            {
+              "name": "пустой журнал ничего не планирует",
+              "input": {
+                "now": 100,
+                "baseDelay": 2,
+                "maxDelay": 20,
+                "maxAttempts": 3,
+                "budgetUntil": 120,
+                "results": []
+              },
+              "expected": {
+                "decisions": []
+              }
+            }
+          ]
+        },
+        {
+          "id": "backend-quota-reservations",
+          "title": "Два воркера делят последний AI-запрос",
+          "summary": "Сделай атомарное резервирование нескольких лимитов: частично списать ресурсы и уйти за кофе нельзя.",
+          "description": "input содержит capacities — объект известных ресурсов с неотрицательными целыми лимитами, и operations в порядке обработки. Операция имеет непустые строковые id и reservationId, kind='reserve' или 'release'; у reserve есть amounts — объект неотрицательных целых объёмов. Названия ресурсов/резерваций состоят из латиницы, цифр и дефиса. Первое вхождение каждого id обрабатывается, все последующие дают duplicate; даже отказ занимает id. release активной резервации возвращает все её объёмы и даёт released, неизвестной/уже освобождённой — missing. Для reserve правила по порядку: reservationId любой когда-либо успешной резервации → conflict (даже после release); неизвестный ключ в amounts → invalid; хотя бы одного ресурса не хватает → insufficient. При invalid/insufficient ничего не списывается и reservationId не занимаетcя. Иначе атомарно вычти все amounts, сохрани активную резервацию, статус reserved. Пустой amounts и нулевые объёмы разрешены. Верни {remaining,receipts:[{id,status}],activeIds}; receipts в порядке операций, activeIds в лексикографическом порядке. Это детерминированная модель транзакции, подключать БД не нужно. Все массивы содержат не более 1000 элементов; целые значения и промежуточные суммы/произведения укладываются в signed 32-bit. Не изменяй входные данные. В Go JSON-числа имеют тип float64, объекты map[string]any, массивы []any; верни объект из Solve, без main().",
+          "defaultLanguage": "go",
+          "languages": {
+            "go": {
+              "label": "Go",
+              "signature": "func Solve(input map[string]any) map[string]any",
+              "starterCode": "package main\n\nfunc Solve(input map[string]any) map[string]any {\n    return map[string]any{\"remaining\": input[\"capacities\"], \"receipts\": []any{}, \"activeIds\": []string{}}\n}\n"
+            }
+          },
+          "publicExampleCount": 2,
+          "tests": [
+            {
+              "name": "нехватка одного ресурса отменяет всё списание",
+              "input": {
+                "capacities": {
+                  "tokens": 5,
+                  "requests": 2
+                },
+                "operations": [
+                  {
+                    "id": "a",
+                    "kind": "reserve",
+                    "reservationId": "bad",
+                    "amounts": {
+                      "tokens": 3,
+                      "requests": 3
+                    }
+                  },
+                  {
+                    "id": "b",
+                    "kind": "reserve",
+                    "reservationId": "good",
+                    "amounts": {
+                      "tokens": 5
+                    }
+                  }
+                ]
+              },
+              "expected": {
+                "remaining": {
+                  "tokens": 0,
+                  "requests": 2
+                },
+                "receipts": [
+                  {
+                    "id": "a",
+                    "status": "insufficient"
+                  },
+                  {
+                    "id": "b",
+                    "status": "reserved"
+                  }
+                ],
+                "activeIds": [
+                  "good"
+                ]
+              }
+            },
+            {
+              "name": "повтор id не превращается в другую операцию",
+              "input": {
+                "capacities": {
+                  "a": 5
+                },
+                "operations": [
+                  {
+                    "id": "same",
+                    "kind": "reserve",
+                    "reservationId": "r",
+                    "amounts": {
+                      "a": 2
+                    }
+                  },
+                  {
+                    "id": "same",
+                    "kind": "release",
+                    "reservationId": "r"
+                  }
+                ]
+              },
+              "expected": {
+                "remaining": {
+                  "a": 3
+                },
+                "receipts": [
+                  {
+                    "id": "same",
+                    "status": "reserved"
+                  },
+                  {
+                    "id": "same",
+                    "status": "duplicate"
+                  }
+                ],
+                "activeIds": [
+                  "r"
+                ]
+              }
+            },
+            {
+              "name": "освобождённый reservationId нельзя использовать заново",
+              "input": {
+                "capacities": {
+                  "a": 5
+                },
+                "operations": [
+                  {
+                    "id": "a",
+                    "kind": "reserve",
+                    "reservationId": "r",
+                    "amounts": {
+                      "a": 2
+                    }
+                  },
+                  {
+                    "id": "b",
+                    "kind": "release",
+                    "reservationId": "r"
+                  },
+                  {
+                    "id": "c",
+                    "kind": "reserve",
+                    "reservationId": "r",
+                    "amounts": {
+                      "a": 1
+                    }
+                  }
+                ]
+              },
+              "expected": {
+                "remaining": {
+                  "a": 5
+                },
+                "receipts": [
+                  {
+                    "id": "a",
+                    "status": "reserved"
+                  },
+                  {
+                    "id": "b",
+                    "status": "released"
+                  },
+                  {
+                    "id": "c",
+                    "status": "conflict"
+                  }
+                ],
+                "activeIds": []
+              }
+            },
+            {
+              "name": "неизвестный ресурс важнее нехватки и не занимает резервацию",
+              "input": {
+                "capacities": {
+                  "a": 2
+                },
+                "operations": [
+                  {
+                    "id": "a",
+                    "kind": "reserve",
+                    "reservationId": "r",
+                    "amounts": {
+                      "a": 3,
+                      "unknown": 1
+                    }
+                  },
+                  {
+                    "id": "b",
+                    "kind": "reserve",
+                    "reservationId": "r",
+                    "amounts": {
+                      "a": 2
+                    }
+                  }
+                ]
+              },
+              "expected": {
+                "remaining": {
+                  "a": 0
+                },
+                "receipts": [
+                  {
+                    "id": "a",
+                    "status": "invalid"
+                  },
+                  {
+                    "id": "b",
+                    "status": "reserved"
+                  }
+                ],
+                "activeIds": [
+                  "r"
+                ]
+              }
+            },
+            {
+              "name": "отказ занимает id но не reservationId",
+              "input": {
+                "capacities": {
+                  "a": 1
+                },
+                "operations": [
+                  {
+                    "id": "missing",
+                    "kind": "release",
+                    "reservationId": "r"
+                  },
+                  {
+                    "id": "fail",
+                    "kind": "reserve",
+                    "reservationId": "r",
+                    "amounts": {
+                      "a": 2
+                    }
+                  },
+                  {
+                    "id": "fail",
+                    "kind": "reserve",
+                    "reservationId": "r",
+                    "amounts": {
+                      "a": 0
+                    }
+                  },
+                  {
+                    "id": "ok",
+                    "kind": "reserve",
+                    "reservationId": "r",
+                    "amounts": {
+                      "a": 1
+                    }
+                  }
+                ]
+              },
+              "expected": {
+                "remaining": {
+                  "a": 0
+                },
+                "receipts": [
+                  {
+                    "id": "missing",
+                    "status": "missing"
+                  },
+                  {
+                    "id": "fail",
+                    "status": "insufficient"
+                  },
+                  {
+                    "id": "fail",
+                    "status": "duplicate"
+                  },
+                  {
+                    "id": "ok",
+                    "status": "reserved"
+                  }
+                ],
+                "activeIds": [
+                  "r"
+                ]
+              }
+            },
+            {
+              "name": "нулевые и пустые резервации тоже имеют жизненный цикл",
+              "input": {
+                "capacities": {
+                  "a": 0
+                },
+                "operations": [
+                  {
+                    "id": "1",
+                    "kind": "reserve",
+                    "reservationId": "z",
+                    "amounts": {}
+                  },
+                  {
+                    "id": "2",
+                    "kind": "reserve",
+                    "reservationId": "a",
+                    "amounts": {
+                      "a": 0
+                    }
+                  },
+                  {
+                    "id": "3",
+                    "kind": "release",
+                    "reservationId": "z"
+                  },
+                  {
+                    "id": "4",
+                    "kind": "release",
+                    "reservationId": "z"
+                  }
+                ]
+              },
+              "expected": {
+                "remaining": {
+                  "a": 0
+                },
+                "receipts": [
+                  {
+                    "id": "1",
+                    "status": "reserved"
+                  },
+                  {
+                    "id": "2",
+                    "status": "reserved"
+                  },
+                  {
+                    "id": "3",
+                    "status": "released"
+                  },
+                  {
+                    "id": "4",
+                    "status": "missing"
+                  }
+                ],
+                "activeIds": [
+                  "a"
+                ]
+              }
+            },
+            {
+              "name": "пустой журнал и пустые лимиты допустимы",
+              "input": {
+                "capacities": {},
+                "operations": []
+              },
+              "expected": {
+                "remaining": {},
+                "receipts": [],
+                "activeIds": []
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "edium-python-2026-09-v4-ai-ml": {
+      "direction": "AI/ML",
+      "languages": [
+        "python"
+      ],
+      "tasks": [
+        {
+          "id": "ai-dataset-quarantine",
+          "title": "Метрика 100%. Датасет подозрительно улыбается",
+          "summary": "Подготовь датасет к обучению и карантин для конфликтной разметки и утечек между train/test.",
+          "description": "Реализуй solve(data). rows — строки с уникальным непустым id, text (строка или null), label и split (строки). Нормализуй text через ' '.join(text.split()).lower() в Python 3.12: схлопни whitespace до одиночного пробела, убери его по краям и переведи текст в нижний регистр. При валидации приоритет причин такой: пустой/нестроковый text → empty_text; label вне safe/unsafe → label; split вне train/test → split. Невалидные строки не участвуют в сравнении. Среди валидных сгруппируй одинаковый нормализованный text. Если в группе разные label — исключи всю группу с label_conflict; иначе если группа есть и в train, и в test — исключи всю группу с test_leakage. Эти причины приоритетнее duplicate. В остальных группах сохрани первую строку, остальные исключи с duplicate. Верни {clean:[{id,text,label,split}],rejected:[{id,reason}]}; оба списка в исходном порядке rows, text в clean нормализован. Это проверка данных до обучения, а не задача на обучение модели. Все массивы содержат не более 1000 элементов. Целые значения и промежуточные вычисления укладываются в signed 32-bit. Не изменяй входные данные; используй обычные dict/list и стандартную библиотеку Python 3.12, без сети или ML-пакетов.",
+          "defaultLanguage": "python",
+          "languages": {
+            "python": {
+              "label": "Python",
+              "signature": "def solve(data: dict) -> dict",
+              "starterCode": "def solve(data: dict) -> dict:\n    return {\"clean\": [], \"rejected\": []}\n"
+            }
+          },
+          "publicExampleCount": 2,
+          "tests": [
+            {
+              "name": "нормализация удаляет дубликаты внутри одного split",
+              "input": {
+                "rows": [
+                  {
+                    "id": "a",
+                    "text": "  Hello\n world ",
+                    "label": "safe",
+                    "split": "train"
+                  },
+                  {
+                    "id": "b",
+                    "text": "hello WORLD",
+                    "label": "safe",
+                    "split": "train"
+                  },
+                  {
+                    "id": "c",
+                    "text": "Кот",
+                    "label": "safe",
+                    "split": "train"
+                  }
+                ]
+              },
+              "expected": {
+                "clean": [
+                  {
+                    "id": "a",
+                    "text": "hello world",
+                    "label": "safe",
+                    "split": "train"
+                  },
+                  {
+                    "id": "c",
+                    "text": "кот",
+                    "label": "safe",
+                    "split": "train"
+                  }
+                ],
+                "rejected": [
+                  {
+                    "id": "b",
+                    "reason": "duplicate"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "одинаковый текст в train и test изолирует всю группу",
+              "input": {
+                "rows": [
+                  {
+                    "id": "a",
+                    "text": "Чай",
+                    "label": "safe",
+                    "split": "train"
+                  },
+                  {
+                    "id": "b",
+                    "text": " чай ",
+                    "label": "safe",
+                    "split": "test"
+                  },
+                  {
+                    "id": "c",
+                    "text": "Суп",
+                    "label": "safe",
+                    "split": "train"
+                  }
+                ]
+              },
+              "expected": {
+                "clean": [
+                  {
+                    "id": "c",
+                    "text": "суп",
+                    "label": "safe",
+                    "split": "train"
+                  }
+                ],
+                "rejected": [
+                  {
+                    "id": "a",
+                    "reason": "test_leakage"
+                  },
+                  {
+                    "id": "b",
+                    "reason": "test_leakage"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "конфликт меток приоритетнее утечки и дубликатов",
+              "input": {
+                "rows": [
+                  {
+                    "id": "a",
+                    "text": "Кот",
+                    "label": "safe",
+                    "split": "train"
+                  },
+                  {
+                    "id": "b",
+                    "text": "кот",
+                    "label": "unsafe",
+                    "split": "test"
+                  },
+                  {
+                    "id": "c",
+                    "text": "КОТ",
+                    "label": "safe",
+                    "split": "train"
+                  }
+                ]
+              },
+              "expected": {
+                "clean": [],
+                "rejected": [
+                  {
+                    "id": "a",
+                    "reason": "label_conflict"
+                  },
+                  {
+                    "id": "b",
+                    "reason": "label_conflict"
+                  },
+                  {
+                    "id": "c",
+                    "reason": "label_conflict"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "валидация имеет явный порядок причин",
+              "input": {
+                "rows": [
+                  {
+                    "id": "a",
+                    "text": null,
+                    "label": "other",
+                    "split": "dev"
+                  },
+                  {
+                    "id": "b",
+                    "text": " ",
+                    "label": "other",
+                    "split": "dev"
+                  },
+                  {
+                    "id": "c",
+                    "text": "A",
+                    "label": "other",
+                    "split": "dev"
+                  },
+                  {
+                    "id": "d",
+                    "text": "B",
+                    "label": "safe",
+                    "split": "dev"
+                  }
+                ]
+              },
+              "expected": {
+                "clean": [],
+                "rejected": [
+                  {
+                    "id": "a",
+                    "reason": "empty_text"
+                  },
+                  {
+                    "id": "b",
+                    "reason": "empty_text"
+                  },
+                  {
+                    "id": "c",
+                    "reason": "label"
+                  },
+                  {
+                    "id": "d",
+                    "reason": "split"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "невалидная строка не создаёт ложную утечку",
+              "input": {
+                "rows": [
+                  {
+                    "id": "bad",
+                    "text": "Кот",
+                    "label": "other",
+                    "split": "test"
+                  },
+                  {
+                    "id": "good",
+                    "text": "кот",
+                    "label": "safe",
+                    "split": "train"
+                  }
+                ]
+              },
+              "expected": {
+                "clean": [
+                  {
+                    "id": "good",
+                    "text": "кот",
+                    "label": "safe",
+                    "split": "train"
+                  }
+                ],
+                "rejected": [
+                  {
+                    "id": "bad",
+                    "reason": "label"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "порядок clean и quarantine соответствует входу",
+              "input": {
+                "rows": [
+                  {
+                    "id": "z",
+                    "text": "B",
+                    "label": "safe",
+                    "split": "train"
+                  },
+                  {
+                    "id": "a",
+                    "text": "A",
+                    "label": "unsafe",
+                    "split": "test"
+                  },
+                  {
+                    "id": "b",
+                    "text": "b",
+                    "label": "safe",
+                    "split": "train"
+                  },
+                  {
+                    "id": "c",
+                    "text": "C",
+                    "label": "safe",
+                    "split": "train"
+                  },
+                  {
+                    "id": "d",
+                    "text": "a",
+                    "label": "unsafe",
+                    "split": "test"
+                  }
+                ]
+              },
+              "expected": {
+                "clean": [
+                  {
+                    "id": "z",
+                    "text": "b",
+                    "label": "safe",
+                    "split": "train"
+                  },
+                  {
+                    "id": "a",
+                    "text": "a",
+                    "label": "unsafe",
+                    "split": "test"
+                  },
+                  {
+                    "id": "c",
+                    "text": "c",
+                    "label": "safe",
+                    "split": "train"
+                  }
+                ],
+                "rejected": [
+                  {
+                    "id": "b",
+                    "reason": "duplicate"
+                  },
+                  {
+                    "id": "d",
+                    "reason": "duplicate"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "пустой датасет не требует особого случая",
+              "input": {
+                "rows": []
+              },
+              "expected": {
+                "clean": [],
+                "rejected": []
+              }
+            }
+          ]
+        },
+        {
+          "id": "ai-grounded-eval",
+          "title": "Нейросеть уверена. Проверяющий тоже умеет читать",
+          "summary": "Собери отчёт eval по подтверждённости утверждений и уместности отказа от ответа.",
+          "description": "data содержит sources — объект sourceId → {text:string,trusted:boolean}, и answers. У ответа уникальный id, boolean abstained, эталонный boolean expectedAnswerable, claims с уникальными внутри ответа id и boolean required, citations с claimId/sourceId/quote (строки). Claim подтверждён, если хотя бы одна citation с его claimId ссылается на существующий trusted=true источник и её quote после strip() непустая и является точной подстрокой source.text. Регистр важен; citation другого claim не помогает. Проверяем техническую прослеживаемость цитат, не истинность утверждений и не смысловое соответствие утверждения цитате. Верни supportedIds/unsupportedIds в порядке claims. Статус ответа определяй строго по порядку: abstained=true → unnecessary_abstain при expectedAnswerable=true, иначе correct_abstain; нет claims → empty; неподтверждён хотя бы один required → unsafe; неподтверждены только необязательные → needs_review; иначе grounded. Даже для abstained посчитай оба списка claims. Верни {reports:[{id,status,supportedIds,unsupportedIds}],counts}; reports в порядке answers, counts содержит все шесть статусов, включая нули. expectedAnswerable влияет только на оценку отказа. Все массивы содержат не более 1000 элементов. Целые значения и промежуточные вычисления укладываются в signed 32-bit. Не изменяй входные данные; используй обычные dict/list и стандартную библиотеку Python 3.12, без сети или ML-пакетов.",
+          "defaultLanguage": "python",
+          "languages": {
+            "python": {
+              "label": "Python",
+              "signature": "def solve(data: dict) -> dict",
+              "starterCode": "def solve(data: dict) -> dict:\n    return {\"reports\": [], \"counts\": {\"grounded\": 0, \"unsafe\": 0, \"needs_review\": 0, \"correct_abstain\": 0, \"unnecessary_abstain\": 0, \"empty\": 0}}\n"
+            }
+          },
+          "publicExampleCount": 2,
+          "tests": [
+            {
+              "name": "точная цитата из доверенного источника подтверждает claim",
+              "input": {
+                "sources": {
+                  "s": {
+                    "text": "Edium умеет учить.",
+                    "trusted": true
+                  }
+                },
+                "answers": [
+                  {
+                    "id": "a",
+                    "claims": [
+                      {
+                        "id": "c",
+                        "required": true
+                      }
+                    ],
+                    "citations": [
+                      {
+                        "claimId": "c",
+                        "sourceId": "s",
+                        "quote": " умеет учить. "
+                      }
+                    ],
+                    "abstained": false,
+                    "expectedAnswerable": true
+                  }
+                ]
+              },
+              "expected": {
+                "reports": [
+                  {
+                    "id": "a",
+                    "status": "grounded",
+                    "supportedIds": [
+                      "c"
+                    ],
+                    "unsupportedIds": []
+                  }
+                ],
+                "counts": {
+                  "grounded": 1,
+                  "unsafe": 0,
+                  "needs_review": 0,
+                  "correct_abstain": 0,
+                  "unnecessary_abstain": 0,
+                  "empty": 0
+                }
+              }
+            },
+            {
+              "name": "выдуманный отсутствующий или недоверенный источник не годится",
+              "input": {
+                "sources": {
+                  "s": {
+                    "text": "Факт",
+                    "trusted": false
+                  },
+                  "t": {
+                    "text": "Факт",
+                    "trusted": true
+                  }
+                },
+                "answers": [
+                  {
+                    "id": "a",
+                    "claims": [
+                      {
+                        "id": "a",
+                        "required": true
+                      },
+                      {
+                        "id": "b",
+                        "required": true
+                      },
+                      {
+                        "id": "c",
+                        "required": true
+                      }
+                    ],
+                    "citations": [
+                      {
+                        "claimId": "a",
+                        "sourceId": "s",
+                        "quote": "Факт"
+                      },
+                      {
+                        "claimId": "b",
+                        "sourceId": "missing",
+                        "quote": "Факт"
+                      },
+                      {
+                        "claimId": "c",
+                        "sourceId": "t",
+                        "quote": "факт"
+                      }
+                    ],
+                    "abstained": false,
+                    "expectedAnswerable": true
+                  }
+                ]
+              },
+              "expected": {
+                "reports": [
+                  {
+                    "id": "a",
+                    "status": "unsafe",
+                    "supportedIds": [],
+                    "unsupportedIds": [
+                      "a",
+                      "b",
+                      "c"
+                    ]
+                  }
+                ],
+                "counts": {
+                  "grounded": 0,
+                  "unsafe": 1,
+                  "needs_review": 0,
+                  "correct_abstain": 0,
+                  "unnecessary_abstain": 0,
+                  "empty": 0
+                }
+              }
+            },
+            {
+              "name": "неподтверждённая необязательная деталь требует review",
+              "input": {
+                "sources": {
+                  "s": {
+                    "text": "Факт",
+                    "trusted": true
+                  }
+                },
+                "answers": [
+                  {
+                    "id": "a",
+                    "claims": [
+                      {
+                        "id": "required",
+                        "required": true
+                      },
+                      {
+                        "id": "optional",
+                        "required": false
+                      }
+                    ],
+                    "citations": [
+                      {
+                        "claimId": "required",
+                        "sourceId": "s",
+                        "quote": "Факт"
+                      }
+                    ],
+                    "abstained": false,
+                    "expectedAnswerable": true
+                  }
+                ]
+              },
+              "expected": {
+                "reports": [
+                  {
+                    "id": "a",
+                    "status": "needs_review",
+                    "supportedIds": [
+                      "required"
+                    ],
+                    "unsupportedIds": [
+                      "optional"
+                    ]
+                  }
+                ],
+                "counts": {
+                  "grounded": 0,
+                  "unsafe": 0,
+                  "needs_review": 1,
+                  "correct_abstain": 0,
+                  "unnecessary_abstain": 0,
+                  "empty": 0
+                }
+              }
+            },
+            {
+              "name": "пустая цитата и совпадение чужого claim не считаются",
+              "input": {
+                "sources": {
+                  "s": {
+                    "text": "Факт",
+                    "trusted": true
+                  }
+                },
+                "answers": [
+                  {
+                    "id": "a",
+                    "claims": [
+                      {
+                        "id": "c",
+                        "required": true
+                      }
+                    ],
+                    "citations": [
+                      {
+                        "claimId": "c",
+                        "sourceId": "s",
+                        "quote": " "
+                      },
+                      {
+                        "claimId": "other",
+                        "sourceId": "s",
+                        "quote": "Факт"
+                      }
+                    ],
+                    "abstained": false,
+                    "expectedAnswerable": true
+                  }
+                ]
+              },
+              "expected": {
+                "reports": [
+                  {
+                    "id": "a",
+                    "status": "unsafe",
+                    "supportedIds": [],
+                    "unsupportedIds": [
+                      "c"
+                    ]
+                  }
+                ],
+                "counts": {
+                  "grounded": 0,
+                  "unsafe": 1,
+                  "needs_review": 0,
+                  "correct_abstain": 0,
+                  "unnecessary_abstain": 0,
+                  "empty": 0
+                }
+              }
+            },
+            {
+              "name": "правильный и лишний отказ учитываются отдельно",
+              "input": {
+                "sources": {},
+                "answers": [
+                  {
+                    "id": "safe",
+                    "claims": [],
+                    "citations": [],
+                    "abstained": true,
+                    "expectedAnswerable": false
+                  },
+                  {
+                    "id": "too-careful",
+                    "claims": [
+                      {
+                        "id": "c",
+                        "required": true
+                      }
+                    ],
+                    "citations": [],
+                    "abstained": true,
+                    "expectedAnswerable": true
+                  },
+                  {
+                    "id": "empty",
+                    "claims": [],
+                    "citations": [],
+                    "abstained": false,
+                    "expectedAnswerable": false
+                  }
+                ]
+              },
+              "expected": {
+                "reports": [
+                  {
+                    "id": "safe",
+                    "status": "correct_abstain",
+                    "supportedIds": [],
+                    "unsupportedIds": []
+                  },
+                  {
+                    "id": "too-careful",
+                    "status": "unnecessary_abstain",
+                    "supportedIds": [],
+                    "unsupportedIds": [
+                      "c"
+                    ]
+                  },
+                  {
+                    "id": "empty",
+                    "status": "empty",
+                    "supportedIds": [],
+                    "unsupportedIds": []
+                  }
+                ],
+                "counts": {
+                  "grounded": 0,
+                  "unsafe": 0,
+                  "needs_review": 0,
+                  "correct_abstain": 1,
+                  "unnecessary_abstain": 1,
+                  "empty": 1
+                }
+              }
+            },
+            {
+              "name": "одной хорошей цитаты достаточно и повторы не дублируют claims",
+              "input": {
+                "sources": {
+                  "s": {
+                    "text": "A B",
+                    "trusted": true
+                  }
+                },
+                "answers": [
+                  {
+                    "id": "a",
+                    "claims": [
+                      {
+                        "id": "b",
+                        "required": true
+                      },
+                      {
+                        "id": "a",
+                        "required": true
+                      }
+                    ],
+                    "citations": [
+                      {
+                        "claimId": "a",
+                        "sourceId": "s",
+                        "quote": "A"
+                      },
+                      {
+                        "claimId": "a",
+                        "sourceId": "s",
+                        "quote": "A"
+                      },
+                      {
+                        "claimId": "b",
+                        "sourceId": "missing",
+                        "quote": "B"
+                      },
+                      {
+                        "claimId": "b",
+                        "sourceId": "s",
+                        "quote": "B"
+                      }
+                    ],
+                    "abstained": false,
+                    "expectedAnswerable": true
+                  }
+                ]
+              },
+              "expected": {
+                "reports": [
+                  {
+                    "id": "a",
+                    "status": "grounded",
+                    "supportedIds": [
+                      "b",
+                      "a"
+                    ],
+                    "unsupportedIds": []
+                  }
+                ],
+                "counts": {
+                  "grounded": 1,
+                  "unsafe": 0,
+                  "needs_review": 0,
+                  "correct_abstain": 0,
+                  "unnecessary_abstain": 0,
+                  "empty": 0
+                }
+              }
+            },
+            {
+              "name": "пустой отчёт сохраняет нулевые счётчики всех статусов",
+              "input": {
+                "sources": {},
+                "answers": []
+              },
+              "expected": {
+                "reports": [],
+                "counts": {
+                  "grounded": 0,
+                  "unsafe": 0,
+                  "needs_review": 0,
+                  "correct_abstain": 0,
+                  "unnecessary_abstain": 0,
+                  "empty": 0
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "ai-rag-context-audit",
+          "title": "В RAG пришла инструкция: «забудь все инструкции»",
+          "summary": "Собери аудит найденных фрагментов перед промптом: проверь происхождение, свежесть, фильтр инструкций и версии источников.",
+          "description": "data содержит now, maxAge (неотрицательные целые секунды), allowedCollections (массив строк) и records в порядке retrieval. У record есть строковые id/sourceId/collection/text, неотрицательные целые revision/retrievedAt и boolean injection — уже выставленный внешним фильтром признак инструкции, которой нельзя доверять. Классификатор prompt injection писать не нужно. Сначала оставь первое вхождение каждого id, остальные rejected с duplicate; даже невалидное первое вхождение занимает id. Для оставшихся причины исключения проверяются строго по порядку: collection не разрешена → collection; injection=true → instruction; retrievedAt>now → future; now-retrievedAt>maxAge → stale; text после strip() пуст → empty. Среди прошедших проверку записей каждого sourceId оставь максимальную revision, при равенстве — первую; вытесненные → superseded. Небезопасная новая версия не вытесняет безопасную старую. Верни {context:[{sourceId,recordId,text,revision}],rejected:[{id,reason}]}, оба списка в исходном порядке records, text в context после strip(). Не сортируй контекст по revision и не добавляй rejected-тексты обратно в промпт. Все массивы содержат не более 1000 элементов. Целые значения и промежуточные вычисления укладываются в signed 32-bit. Не изменяй входные данные; используй обычные dict/list и стандартную библиотеку Python 3.12, без сети или ML-пакетов.",
+          "defaultLanguage": "python",
+          "languages": {
+            "python": {
+              "label": "Python",
+              "signature": "def solve(data: dict) -> dict",
+              "starterCode": "def solve(data: dict) -> dict:\n    return {\"context\": [], \"rejected\": []}\n"
+            }
+          },
+          "publicExampleCount": 2,
+          "tests": [
+            {
+              "name": "в контекст попадают только разрешённые коллекции",
+              "input": {
+                "now": 100,
+                "maxAge": 10,
+                "allowedCollections": [
+                  "docs"
+                ],
+                "records": [
+                  {
+                    "id": "a",
+                    "sourceId": "s",
+                    "revision": 1,
+                    "retrievedAt": 90,
+                    "collection": "docs",
+                    "text": "Факт",
+                    "injection": false
+                  },
+                  {
+                    "id": "b",
+                    "sourceId": "private",
+                    "revision": 1,
+                    "retrievedAt": 90,
+                    "collection": "private",
+                    "text": "Факт",
+                    "injection": true
+                  }
+                ]
+              },
+              "expected": {
+                "context": [
+                  {
+                    "sourceId": "s",
+                    "recordId": "a",
+                    "text": "Факт",
+                    "revision": 1
+                  }
+                ],
+                "rejected": [
+                  {
+                    "id": "b",
+                    "reason": "collection"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "инструкция исключается и первое плохое id всё равно занимает ключ",
+              "input": {
+                "now": 100,
+                "maxAge": 10,
+                "allowedCollections": [
+                  "docs"
+                ],
+                "records": [
+                  {
+                    "id": "a",
+                    "sourceId": "s",
+                    "revision": 1,
+                    "retrievedAt": 90,
+                    "collection": "docs",
+                    "text": "Факт",
+                    "injection": true
+                  },
+                  {
+                    "id": "a",
+                    "sourceId": "s",
+                    "revision": 1,
+                    "retrievedAt": 90,
+                    "collection": "docs",
+                    "text": "Факт",
+                    "injection": false
+                  },
+                  {
+                    "id": "b",
+                    "sourceId": "t",
+                    "revision": 1,
+                    "retrievedAt": 90,
+                    "collection": "docs",
+                    "text": "Факт",
+                    "injection": false
+                  }
+                ]
+              },
+              "expected": {
+                "context": [
+                  {
+                    "sourceId": "t",
+                    "recordId": "b",
+                    "text": "Факт",
+                    "revision": 1
+                  }
+                ],
+                "rejected": [
+                  {
+                    "id": "a",
+                    "reason": "instruction"
+                  },
+                  {
+                    "id": "a",
+                    "reason": "duplicate"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "граница свежести включена а будущее исключается",
+              "input": {
+                "now": 100,
+                "maxAge": 10,
+                "allowedCollections": [
+                  "docs"
+                ],
+                "records": [
+                  {
+                    "id": "edge",
+                    "sourceId": "a",
+                    "revision": 1,
+                    "retrievedAt": 90,
+                    "collection": "docs",
+                    "text": "Факт",
+                    "injection": false
+                  },
+                  {
+                    "id": "old",
+                    "sourceId": "b",
+                    "revision": 1,
+                    "retrievedAt": 89,
+                    "collection": "docs",
+                    "text": "Факт",
+                    "injection": false
+                  },
+                  {
+                    "id": "future",
+                    "sourceId": "c",
+                    "revision": 1,
+                    "retrievedAt": 101,
+                    "collection": "docs",
+                    "text": "Факт",
+                    "injection": false
+                  }
+                ]
+              },
+              "expected": {
+                "context": [
+                  {
+                    "sourceId": "a",
+                    "recordId": "edge",
+                    "text": "Факт",
+                    "revision": 1
+                  }
+                ],
+                "rejected": [
+                  {
+                    "id": "old",
+                    "reason": "stale"
+                  },
+                  {
+                    "id": "future",
+                    "reason": "future"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "новая безопасная версия вытесняет старую без перестановки других источников",
+              "input": {
+                "now": 100,
+                "maxAge": 10,
+                "allowedCollections": [
+                  "docs"
+                ],
+                "records": [
+                  {
+                    "id": "old",
+                    "sourceId": "s",
+                    "revision": 1,
+                    "retrievedAt": 90,
+                    "collection": "docs",
+                    "text": "Факт",
+                    "injection": false
+                  },
+                  {
+                    "id": "other",
+                    "sourceId": "t",
+                    "revision": 1,
+                    "retrievedAt": 90,
+                    "collection": "docs",
+                    "text": "Факт",
+                    "injection": false
+                  },
+                  {
+                    "id": "new",
+                    "sourceId": "s",
+                    "revision": 3,
+                    "retrievedAt": 90,
+                    "collection": "docs",
+                    "text": " Новый факт ",
+                    "injection": false
+                  },
+                  {
+                    "id": "late",
+                    "sourceId": "s",
+                    "revision": 2,
+                    "retrievedAt": 90,
+                    "collection": "docs",
+                    "text": "Факт",
+                    "injection": false
+                  }
+                ]
+              },
+              "expected": {
+                "context": [
+                  {
+                    "sourceId": "t",
+                    "recordId": "other",
+                    "text": "Факт",
+                    "revision": 1
+                  },
+                  {
+                    "sourceId": "s",
+                    "recordId": "new",
+                    "text": "Новый факт",
+                    "revision": 3
+                  }
+                ],
+                "rejected": [
+                  {
+                    "id": "old",
+                    "reason": "superseded"
+                  },
+                  {
+                    "id": "late",
+                    "reason": "superseded"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "пустая или небезопасная новая версия не убирает хороший источник",
+              "input": {
+                "now": 100,
+                "maxAge": 10,
+                "allowedCollections": [
+                  "docs"
+                ],
+                "records": [
+                  {
+                    "id": "good",
+                    "sourceId": "s",
+                    "revision": 1,
+                    "retrievedAt": 90,
+                    "collection": "docs",
+                    "text": "Факт",
+                    "injection": false
+                  },
+                  {
+                    "id": "empty",
+                    "sourceId": "s",
+                    "revision": 8,
+                    "retrievedAt": 90,
+                    "collection": "docs",
+                    "text": " \n ",
+                    "injection": false
+                  },
+                  {
+                    "id": "attack",
+                    "sourceId": "s",
+                    "revision": 9,
+                    "retrievedAt": 90,
+                    "collection": "docs",
+                    "text": "Факт",
+                    "injection": true
+                  }
+                ]
+              },
+              "expected": {
+                "context": [
+                  {
+                    "sourceId": "s",
+                    "recordId": "good",
+                    "text": "Факт",
+                    "revision": 1
+                  }
+                ],
+                "rejected": [
+                  {
+                    "id": "empty",
+                    "reason": "empty"
+                  },
+                  {
+                    "id": "attack",
+                    "reason": "instruction"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "равная версия оставляет первый фрагмент",
+              "input": {
+                "now": 100,
+                "maxAge": 10,
+                "allowedCollections": [
+                  "docs"
+                ],
+                "records": [
+                  {
+                    "id": "first",
+                    "sourceId": "s",
+                    "revision": 1,
+                    "retrievedAt": 90,
+                    "collection": "docs",
+                    "text": "  A  ",
+                    "injection": false
+                  },
+                  {
+                    "id": "second",
+                    "sourceId": "s",
+                    "revision": 1,
+                    "retrievedAt": 90,
+                    "collection": "docs",
+                    "text": "B",
+                    "injection": false
+                  }
+                ]
+              },
+              "expected": {
+                "context": [
+                  {
+                    "sourceId": "s",
+                    "recordId": "first",
+                    "text": "A",
+                    "revision": 1
+                  }
+                ],
+                "rejected": [
+                  {
+                    "id": "second",
+                    "reason": "superseded"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "пустой retrieval возвращает пустой контекст",
+              "input": {
+                "now": 100,
+                "maxAge": 10,
+                "allowedCollections": [
+                  "docs"
+                ],
+                "records": []
+              },
+              "expected": {
+                "context": [],
+                "rejected": []
+              }
+            }
+          ]
+        }
+      ]
+    },
     "edium-mobile-2026-09-v3": {
       "direction": "Мобильная разработка",
       "languages": [
@@ -819,7 +2996,7 @@
       ]
     },
     "edium-js-2026-09-v3-boost": {
-      "direction": "Системная разработка (EdiumBoost)",
+      "direction": "Системная разработка",
       "languages": [
         "javascript"
       ],
@@ -1409,7 +3586,7 @@
         {
           "id": "boost-weather-card",
           "title": "Погода вчерашняя, уверенность сегодняшняя",
-          "summary": "Сохрани полезную карточку на экране Boost при сбоях сервиса и покажи, когда ей уже нельзя безоговорочно верить.",
+          "summary": "Сохрани полезную карточку на информационном экране при сбоях сервиса и покажи, когда ей уже нельзя безоговорочно верить.",
           "description": "Реализуй solve(input). now и ttl — неотрицательные целые секунды. cards имеют уникальный id, JSON-значение value, revision и updatedAt<=now; начальный error=false. events идут в порядке доставки и содержат cardId, revision, at, boolean ok и value. Игнорируй неизвестные карточки, события из будущего (at>now) и revision не больше уже принятой. Принятое событие всегда обновляет revision: при ok=true обнови value и updatedAt=at, сбрось error; при ok=false сохрани прежние value/updatedAt и установи error=true. Верни cards в исходном порядке как {id,value,revision,stale,error}, где stale=(now-updatedAt>=ttl). Для visible выбери активное предупреждение из alerts (startsAt<=now<endsAt) с максимальным priority; при равенстве — первое в alerts. Тогда visible={kind:'alert',id,text}. Если активных нет, visible={kind:'card',id:selectedId}; selectedId гарантированно существует. У предупреждений уникальные id, целый priority, startsAt<endsAt и строка text. Все числа безопасные целые, revision и время неотрицательны.",
           "signature": "function solve(input) -> { cards, visible }",
           "starterCode": "function solve(input) {\n  return { cards: [], visible: { kind: 'card', id: input.selectedId } }\n}\n",

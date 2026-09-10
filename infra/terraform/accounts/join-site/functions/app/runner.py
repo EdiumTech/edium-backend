@@ -21,7 +21,7 @@ class SandboxRunner:
     @property
     def supported_languages(self) -> set[str]:
         configured = os.getenv("RUNNER_LANGUAGES", "javascript").split(",")
-        return {value.strip() for value in configured if value.strip() in {"javascript", "kotlin", "swift"}}
+        return {value.strip() for value in configured if value.strip() in {"javascript", "kotlin", "swift", "python", "go"}}
 
     def run(self, task_id: str, source: str, task_set_version: str, language: str = "javascript") -> dict:
         if not self.enabled:

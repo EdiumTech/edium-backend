@@ -270,12 +270,15 @@ def mark_invitation_pending(contest: dict, now: datetime) -> None:
 
 def candidate_view(contest: dict) -> dict:
     languages = supported_languages(assigned_task_set(contest))
+    direction = contest.get("direction")
+    if direction == "Системная разработка (EdiumBoost)":
+        direction = "Системная разработка"
     return {
         "id": contest["contest_id"],
         "state": contest["state"],
         "language": languages[0] if len(languages) == 1 else "mixed",
         "languages": languages,
-        "direction": contest.get("direction"),
+        "direction": direction,
         "trackLabel": track_label(assigned_task_set(contest)),
         "taskSetVersion": assigned_task_set(contest),
         "durationMinutes": contest["duration_minutes"],

@@ -118,6 +118,16 @@ class ContestTests(unittest.TestCase):
             save_answer(design, task_id, {"source": "function solve() {}"}, design["revision"], self.now)
         self.assertTrue(submit_contest(design, self.now))
 
+    def test_retired_system_direction_is_sanitized_only_in_candidate_view(self):
+        contest, _ = new_contest(
+            "old-system-app", 90, self.now + timedelta(days=1), self.now,
+            direction="Системная разработка (EdiumBoost)",
+        )
+        self.assertEqual(contest["direction"], "Системная разработка (EdiumBoost)")
+        public = candidate_view(contest)
+        self.assertEqual(public["direction"], "Системная разработка")
+        self.assertEqual(public["trackLabel"], "Системная разработка")
+
     def test_existing_v1_assignments_stay_v1_without_explanation_requirement(self):
         self.contest["task_set_version"] = LEGACY_TASK_SET_VERSION
         self.contest.pop("direction", None)
