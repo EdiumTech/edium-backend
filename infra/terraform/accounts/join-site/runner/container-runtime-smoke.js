@@ -4,6 +4,7 @@
 // mounted read-only by the workflow and are never copied into the image.
 const { runSubmission } = require('/app/dispatcher')
 const { roleReferenceSolutions } = require('./role-reference-solutions.testdata')
+const { mobileReferenceSolutions } = require('./mobile-reference-solutions.testdata')
 
 const versions = {
   go: 'edium-go-2026-09-v4-backend',
@@ -14,7 +15,8 @@ const versions = {
 
 async function main() {
   let checks = 0
-  for (const [taskId, sources] of Object.entries(roleReferenceSolutions)) {
+  const nativeReferences = { ...roleReferenceSolutions, ...mobileReferenceSolutions }
+  for (const [taskId, sources] of Object.entries(nativeReferences)) {
     for (const [language, source] of Object.entries(sources)) {
       if (!versions[language]) continue
       const result = await runSubmission(taskId, source, versions[language], language)
