@@ -34,11 +34,21 @@ class Mailer:
         )
 
     def send_candidate(self, application: dict) -> None:
+        direction = application.get("direction") or "не указано"
         self._send(
             application["email"],
-            "Заявка в команду Edium получена",
-            f"{application['first_name']}, спасибо! Заявка получена.\n\n"
-            "Если увидим подходящее направление для сотрудничества, свяжемся с тобой.\n",
+            "Мы получили твою заявку в Edium",
+            f"Привет, {application['first_name']}!\n\n"
+            "Спасибо за интерес к Edium — твоя заявка у нас.\n"
+            f"Направление: {direction}.\n\n"
+            "Что дальше:\n"
+            "— команда посмотрит резюме и ответы;\n"
+            "— если опыт подойдёт под одну из текущих задач, мы напишем или позвоним "
+            "по указанным контактам.\n\n"
+            "Обычно первичный просмотр занимает несколько рабочих дней. "
+            "Пока ничего дополнительно отправлять не нужно.\n\n"
+            "До связи!\n"
+            "Команда Edium\n",
             f"candidate:{application['application_id']}:confirmation",
         )
 
