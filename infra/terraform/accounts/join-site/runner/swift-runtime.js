@@ -11,6 +11,7 @@ const WASMTIME_VERSION = '48.0.1'
 const WASMTIME_MACOS_ARM_SHA256 = '88cc08b395fbfb960b99f355a81224af975679b8a5f4b74a51d59e5e34b20dcd'
 const MAX_SOURCE_BYTES = 65536
 const MAX_WASM_BYTES = 128 * 1024 * 1024
+const MAX_PRECOMPILED_BYTES = 256 * 1024 * 1024
 const MAX_RESULT_BYTES = 262144
 const COMPILE_TIMEOUT_MS = 45000
 const TEST_PROCESS_TIMEOUT_MS = 10000
@@ -18,12 +19,16 @@ const PROCESS_GROUP_RSS_LIMIT = 1536 * 1024 * 1024
 
 // No directories, sockets, inherited environment, or native extension imports
 // are granted to candidate modules. The default cache stays disabled; runSwift
-// enables only a fresh host-owned cache outside compiler-writable directories.
-const WASMTIME_ARGS = Object.freeze([
-  'run', '-C', 'cache=no',
-  '-W', 'fuel=100000000,max-memory-size=67108864,max-wasm-stack=524288,timeout=750ms,threads=no',
+// creates one validated host-owned precompiled artifact after the compiler exits.
+const WASMTIME_ENGINE_ARGS = Object.freeze([
+  '-C', 'cache=no,parallel-compilation=no',
+  '-W', 'fuel=100000000,epoch-interruption=y,max-memory-size=67108864,max-wasm-stack=524288,threads=no',
+])
+const WASMTIME_EXECUTION_ARGS = Object.freeze(['-W', 'timeout=750ms'])
+const WASMTIME_WASI_ARGS = Object.freeze([
   '-S', 'inherit-env=no,inherit-network=no,allow-ip-name-lookup=no,tcp=no,udp=no,http=no,threads=no',
 ])
+const WASMTIME_ARGS = Object.freeze(['run', ...WASMTIME_ENGINE_ARGS, ...WASMTIME_EXECUTION_ARGS, ...WASMTIME_WASI_ARGS])
 
 function failure(code, message) {
   const error = new Error(message)
@@ -177,6 +182,12 @@ async function runSwift(source, suite, options = {}) {
     const runtimeVersion = await boundedProcess(config.wasmtimeExecutable, ['--version'], {
       cwd: jobDirectory, env: {}, timeout: 5000, maxBytes: 16384,
     })
+    if (process.env.EDIUM_RUNTIME_DIAGNOSTICS === '1'
+      && (compilerVersion.status !== 0 || runtimeVersion.status !== 0
+        || !compilerVersion.stdout.includes(`Swift version ${SWIFT_VERSION} (swift-${SWIFT_VERSION}-RELEASE)`)
+        || !runtimeVersion.stdout.startsWith(`wasmtime ${WASMTIME_VERSION} (`))) {
+      process.stderr.write(`Swift versions: compiler status=${compilerVersion.status} reason=${compilerVersion.reason || ''} stdout=${compilerVersion.stdout} stderr=${compilerVersion.stderr}; runtime status=${runtimeVersion.status} reason=${runtimeVersion.reason || ''} stdout=${runtimeVersion.stdout} stderr=${runtimeVersion.stderr}\n`)
+    }
     if (compilerVersion.status !== 0 || !compilerVersion.stdout.includes(`Swift version ${SWIFT_VERSION} (swift-${SWIFT_VERSION}-RELEASE)`)
       || runtimeVersion.status !== 0 || !runtimeVersion.stdout.startsWith(`wasmtime ${WASMTIME_VERSION} (`)) throw unavailable()
     const candidate = path.join(jobDirectory, 'Candidate.swift')
@@ -228,15 +239,34 @@ async function runSwift(source, suite, options = {}) {
     // --allow-precompiled/deserialization option is accepted from a candidate.
     runtimeDirectory = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'edium-swift-runtime-'))
     const runtimeArtifact = path.join(runtimeDirectory, 'candidate.wasm')
-    const cacheConfig = path.join(runtimeDirectory, 'cache.toml')
+    const compiledArtifact = path.join(runtimeDirectory, 'candidate.cwasm')
     fs.writeFileSync(runtimeArtifact, wasm, { flag: 'wx', mode: 0o600 })
-    fs.writeFileSync(cacheConfig, `[cache]\ndirectory = ${JSON.stringify(path.join(runtimeDirectory, 'cache'))}\n`, { flag: 'wx', mode: 0o600 })
+    const precompilation = await boundedProcess(config.wasmtimeExecutable,
+      ['compile', ...WASMTIME_ENGINE_ARGS, '-o', compiledArtifact, runtimeArtifact], {
+        cwd: runtimeDirectory, env: {}, timeout: 30000, maxBytes: 1024 * 1024, monitorMemory: true,
+      })
+    if (precompilation.reason === 'monitor_unavailable' || precompilation.error || precompilation.status !== 0) {
+      if (process.env.EDIUM_RUNTIME_DIAGNOSTICS === '1') {
+        process.stderr.write(`Swift precompile: reason=${precompilation.reason || ''} status=${precompilation.status} ${precompilation.stderr}\n`)
+      }
+      throw unavailable()
+    }
+    const compiledDescriptor = fs.openSync(compiledArtifact, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK)
+    try {
+      const stat = fs.fstatSync(compiledDescriptor)
+      if (!stat.isFile() || stat.size < 8 || stat.size > MAX_PRECOMPILED_BYTES) throw unavailable()
+    } finally {
+      fs.closeSync(compiledDescriptor)
+    }
     const results = []
     for (const test of suite) {
-      const execution = await boundedProcess(config.wasmtimeExecutable, [...WASMTIME_ARGS, '-C', `cache=yes,cache-config=${cacheConfig}`, runtimeArtifact], {
+      const execution = await boundedProcess(config.wasmtimeExecutable, [...WASMTIME_ARGS, '--allow-precompiled', compiledArtifact], {
         cwd: runtimeDirectory, env: {}, timeout: TEST_PROCESS_TIMEOUT_MS, maxBytes: MAX_RESULT_BYTES,
         input: JSON.stringify(test.input) + '\n',
       })
+      if (process.env.EDIUM_RUNTIME_DIAGNOSTICS === '1' && (execution.reason || execution.status !== 0)) {
+        process.stderr.write(`Swift runtime: reason=${execution.reason || ''} status=${execution.status} ${execution.stderr}\n`)
+      }
       if (execution.reason === 'monitor_unavailable' || execution.error || /unexpected argument|invalid value|unknown (option|wasm|wasi)|failed to (?:read|create) cache|failed to parse config/.test(execution.stderr)) throw unavailable()
       let message = ''
       let passed = false
